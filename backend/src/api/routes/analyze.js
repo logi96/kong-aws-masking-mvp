@@ -129,7 +129,8 @@ async function handleAnalyzeRequest(req, res, next) {
       console.log('Sending data to Claude API for analysis');
       analysis = await claudeService.analyzeAwsData(awsResources, {
         analysisType: options.analysisType,
-        maxTokens: 2048
+        maxTokens: 2048,
+        systemPrompt: options.systemPrompt
       });
 
       clearTimeout(timeoutId);

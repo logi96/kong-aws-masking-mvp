@@ -69,12 +69,10 @@ function _M.mask_data(data, mapping_store, config)
     timestamp = os.time()
   }
   
-  kong.log.info("Masker: mask_data called with data type: " .. type(data))
-  kong.log.info("Masker: mapping_store present: " .. (mapping_store and "yes" or "no"))
-  kong.log.info("Masker: config present: " .. (config and "yes" or "no"))
+  -- 보안: 함수 호출 정보를 로그에 노출하지 않음
   
   if not data then
-    kong.log.info("Masker: No data provided, returning unchanged")
+    -- 데이터 없음
     result.masked = data
     result.duration = (os.clock() - start_time) * 1000
     return result
@@ -82,13 +80,13 @@ function _M.mask_data(data, mapping_store, config)
   
   -- Handle different data types
   if type(data) == "string" then
-    kong.log.info("Masker: Processing string data, length: " .. string.len(data))
+    -- 문자열 처리
     result.masked, result.count = _M._mask_string(data, mapping_store, config)
   elseif type(data) == "table" then
-    kong.log.info("Masker: Processing table data")
+    -- 테이블 처리
     result.masked, result.count = _M._mask_table(data, mapping_store, config)
   else
-    kong.log.info("Masker: Data type not supported for masking: " .. type(data))
+    -- 지원하지 않는 타입
     result.masked = data
   end
   
@@ -101,7 +99,7 @@ function _M.mask_data(data, mapping_store, config)
   
   -- Performance check per CLAUDE.md requirements
   if result.duration > 100 then
-    kong.log.warn("Masking took " .. result.duration .. "ms (>100ms limit)")
+    -- 성능 경고: 100ms 초과
   end
   
   return result
@@ -134,22 +132,22 @@ end
 -- @return string,number Masked text and count of masked resources
 function _M._mask_string(text, mapping_store, config)
   if not text or type(text) ~= "string" then
-    kong.log.info("Masker: _mask_string called with invalid input")
+    -- 유효하지 않은 입력
     return text, 0
   end
   
-  kong.log.info("Masker: _mask_string processing text of length: " .. string.len(text))
+  -- 보안: 텍스트 길이 정보도 노출하지 않음
   
   local masked_text = text
   local mask_count = 0
   
   -- Apply each pattern type
   for pattern_name, pattern_def in pairs(patterns.patterns) do
-    kong.log.info("Masker: Checking pattern: " .. pattern_name .. " for type: " .. pattern_def.type)
+    -- 패턴 체크 중
     
     -- Skip if pattern disabled in config
     if config and config["mask_" .. pattern_def.type] == false then
-      kong.log.info("Masker: Pattern " .. pattern_name .. " disabled in config")
+      -- 패턴 비활성화됨
       goto continue
     end
     
@@ -157,26 +155,26 @@ function _M._mask_string(text, mapping_store, config)
     local matches = {}
     
     -- Debug the pattern and input text
-    kong.log.info("Masker: Testing pattern '" .. pattern_def.pattern .. "' against text sample: '" .. text:sub(1, 100) .. "'")
+    -- 보안: 텍스트 샘플을 로그에 노출하지 않음
     
     for match in string.gmatch(text, pattern_def.pattern) do
-      kong.log.info("Masker: Found match for " .. pattern_name .. ": " .. match)
+      -- 보안: 실제 매칭된 값을 로그에 출력하지 않음
       table.insert(matches, match)
     end
     
-    kong.log.info("Masker: Found " .. #matches .. " matches for pattern " .. pattern_name)
+    -- 매치 수 계산 완료
     
     -- Test single match for debugging
     if #matches == 0 and pattern_name == "ec2_instance" then
       local test_match = string.match(text, pattern_def.pattern)
-      kong.log.info("Masker: Direct string.match test for EC2: " .. tostring(test_match))
+      -- EC2 패턴 테스트 (로그 제거)
     end
     
     -- Replace each match with masked version
     for _, original_value in ipairs(matches) do
       local masked_id = _M._get_or_create_masked_id(original_value, pattern_def, mapping_store)
       if masked_id then
-        kong.log.info("Masker: Masking " .. original_value .. " -> " .. masked_id)
+        -- 보안: 마스킹 매핑을 로그에 노출하지 않음
         -- Replace all occurrences of this original value
         masked_text = string.gsub(masked_text, _M._escape_pattern(original_value), masked_id)
         mask_count = mask_count + 1
@@ -186,7 +184,7 @@ function _M._mask_string(text, mapping_store, config)
     ::continue::
   end
   
-  kong.log.info("Masker: _mask_string completed, total masked: " .. mask_count)
+  -- 마스킹 완료
   return masked_text, mask_count
 end
 
@@ -291,7 +289,7 @@ function _M._get_or_create_masked_id(original_value, pattern_def, mapping_store)
   end
   
   if current_count >= mapping_store.config.max_mappings then
-    kong.log.warn("Mapping store limit reached: " .. mapping_store.config.max_mappings)
+    -- 매핑 저장소 한계 도달
     _M._cleanup_old_mappings(mapping_store)
   end
   
@@ -350,7 +348,7 @@ function _M._cleanup_old_mappings(mapping_store)
   end
   
   if removed_count > 0 then
-    kong.log.info("Cleaned up " .. removed_count .. " expired mappings")
+    -- 만료된 매핑 정리됨
   end
   
   return removed_count
@@ -367,7 +365,7 @@ function _M.clear_mappings(mapping_store)
   mapping_store.counters = {}
   mapping_store.timestamps = {}
   
-  kong.log.info("Cleared all mappings from store")
+  -- 모든 매핑 제거됨
 end
 
 ---

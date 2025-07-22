@@ -6,10 +6,12 @@ const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');
 const compression = require('compression');
+const path = require('path');
 
 // 라우트 및 미들웨어 import
 const { router: healthRouter } = require('./api/routes/health');
 const { router: analyzeRouter } = require('./api/routes/analyze');
+const monitoringRouter = require('../monitoring-api');
 const { notFoundHandler, globalErrorHandler } = require('./api/middlewares/errorHandler');
 
 /**
@@ -47,14 +49,18 @@ function createApp() {
   const logFormat = process.env.NODE_ENV === 'production' ? 'combined' : 'dev';
   app.use(morgan(logFormat));
   
-  // 6. API 라우트 등록
+  // 6. Static 파일 서빙 (모니터링 대시보드)
+  app.use('/public', express.static(path.join(__dirname, '..', 'public')));
+  
+  // 7. API 라우트 등록
   app.use('/health', healthRouter);
   app.use('/analyze', analyzeRouter);
+  app.use('/api/monitoring', monitoringRouter);
   
-  // 7. 404 에러 핸들러
+  // 8. 404 에러 핸들러
   app.use('*', notFoundHandler);
   
-  // 8. 글로벌 에러 핸들러
+  // 9. 글로벌 에러 핸들러
   app.use(globalErrorHandler);
   
   return app;

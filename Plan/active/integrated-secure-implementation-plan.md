@@ -7,12 +7,26 @@
 ## 📋 통합된 핵심 설계 원칙
 
 ### 1. 데이터 플로우 및 마스킹 대상
+**참조**: 
+- [claude-api-masking-strategy.md](./claude-api-masking-strategy.md) - Claude API 공식 문서 기반 마스킹 대상 분석
+- [updated-aws-masking-expansion-plan.md](./updated-aws-masking-expansion-plan.md) - 확장된 패턴 및 마스킹 구현
+
 ```javascript
-// 실제 마스킹 대상 (updated-aws-masking-expansion-plan.md)
+// 실제 마스킹 대상 - Claude API의 모든 텍스트 필드
 {
+  "system": "Analyze AWS infrastructure...",  // 시스템 프롬프트
   "messages": [{
     "role": "user",
-    "content": "Instance i-123... in vpc-456... with IP 10.0.1.100..."
+    "content": "Instance i-123... in vpc-456... with IP 10.0.1.100..."  // 문자열 content
+  }, {
+    "role": "user",
+    "content": [{
+      "type": "text",
+      "text": "Check EC2 i-456..."  // 멀티모달 텍스트
+    }]
+  }],
+  "tools": [{
+    "description": "Access S3 bucket my-data..."  // 도구 설명
   }]
 }
 ```
@@ -116,7 +130,11 @@ local emergency_handler = {
 
 ### Phase 1: 복합 패턴 테스트 환경 (3-5일)
 
-#### 1.1 Enhanced Test Suite 실행 (enhanced-pattern-test-plan.md)
+#### 1.1 Enhanced Test Suite 실행
+**참조 문서**:
+- [enhanced-pattern-test-plan.md](./enhanced-pattern-test-plan.md) - 복합 패턴 테스트 설계
+- [claude-api-masking-strategy.md#케이스별-처리-로직](./claude-api-masking-strategy.md#케이스별-처리-로직) - Claude API 구조별 테스트 케이스
+
 ```bash
 # 1. 단위 테스트
 lua tests/run-pattern-unit-tests.lua
@@ -124,10 +142,13 @@ lua tests/run-pattern-unit-tests.lua
 # 2. 복합 패턴 테스트
 lua tests/run-enhanced-pattern-tests.lua
 
-# 3. 보안 우회 시도 테스트
+# 3. Claude API 구조 테스트 (system, messages, tools 필드)
+lua tests/test-claude-api-structure.lua
+
+# 4. 보안 우회 시도 테스트
 lua tests/security-bypass-tests.lua --aggressive
 
-# 4. 부하 테스트
+# 5. 부하 테스트
 lua tests/load-test-masking.lua \
     --concurrent=100 \
     --duration=3600 \
@@ -394,5 +415,17 @@ kubectl rollout undo deployment/kong-gateway
 2. **안전한 배포**: 단계별 검증과 즉시 롤백
 3. **완벽한 모니터링**: 실시간 지표와 자동 대응
 4. **투명한 운영**: 모든 활동 감사 로깅
+
+## 📚 관련 문서 참조
+
+### 필수 참조 문서
+1. **[claude-api-masking-strategy.md](./claude-api-masking-strategy.md)** - Claude API 공식 문서 기반 마스킹 전략
+2. **[updated-aws-masking-expansion-plan.md](./updated-aws-masking-expansion-plan.md)** - AWS 패턴 확장 및 구현 계획
+3. **[enhanced-pattern-test-plan.md](./enhanced-pattern-test-plan.md)** - 복합 패턴 테스트 설계
+4. **[critical-design-review-report.md](./critical-design-review-report.md)** - 보안 위험 분석 및 검증 체계
+5. **[document-dependency-analysis.md](./document-dependency-analysis.md)** - 문서 종속성 및 실행 순서 가이드
+
+### 실행 순서
+**참조**: [document-dependency-analysis.md#권장-실행-순서](./document-dependency-analysis.md#권장-실행-순서)
 
 **다음 단계**: Phase 0 보안 기반 준비부터 즉시 시작

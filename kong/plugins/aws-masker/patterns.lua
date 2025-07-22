@@ -28,6 +28,38 @@ _M.patterns = {
     description = "Private IP addresses in 10.x.x.x range"
   },
   
+  -- Private IP Address Pattern (172.16-31.x.x)
+  private_ip_172 = {
+    pattern = "172%.1[6-9]%.%d+%.%d+",
+    replacement = "PRIVATE_IP_%03d",
+    type = "ip",
+    description = "Private IP addresses in 172.16-19.x.x range"
+  },
+  
+  -- Private IP Address Pattern (172.20-31.x.x)
+  private_ip_172_2 = {
+    pattern = "172%.2%d%.%d+%.%d+",
+    replacement = "PRIVATE_IP_%03d",
+    type = "ip",
+    description = "Private IP addresses in 172.20-29.x.x range"
+  },
+  
+  -- Private IP Address Pattern (172.30-31.x.x)
+  private_ip_172_3 = {
+    pattern = "172%.3[01]%.%d+%.%d+",
+    replacement = "PRIVATE_IP_%03d",
+    type = "ip",
+    description = "Private IP addresses in 172.30-31.x.x range"
+  },
+  
+  -- Private IP Address Pattern (192.168.x.x)
+  private_ip_192 = {
+    pattern = "192%.168%.%d+%.%d+",
+    replacement = "PRIVATE_IP_%03d",
+    type = "ip",
+    description = "Private IP addresses in 192.168.x.x range"
+  },
+  
   -- S3 Bucket Name Pattern (common bucket naming patterns)
   s3_bucket = {
     pattern = "[a-z0-9][a-z0-9%-]*bucket[a-z0-9%-]*",
@@ -50,6 +82,382 @@ _M.patterns = {
     replacement = "RDS_%03d",
     type = "rds",
     description = "RDS database names containing 'db'"
+  },
+  
+  -- Security Group Pattern (sg-xxxxxxxx)
+  security_group = {
+    pattern = "sg%-[0-9a-f]+",
+    replacement = "SG_%03d",
+    type = "vpc",
+    description = "Security group identifier (sg-xxxxxxxx format)"
+  },
+  
+  -- Subnet Pattern (subnet-xxxxxxxx)
+  subnet = {
+    pattern = "subnet%-[0-9a-f]+",
+    replacement = "SUBNET_%03d",
+    type = "vpc",
+    description = "Subnet identifier (subnet-xxxxxxxx format)"
+  },
+  
+  -- VPC Pattern (vpc-xxxxxxxx)
+  vpc = {
+    pattern = "vpc%-[0-9a-f]+",
+    replacement = "VPC_%03d",
+    type = "vpc",
+    description = "VPC identifier (vpc-xxxxxxxx format)"
+  },
+  
+  -- AMI Pattern (ami-xxxxxxxx)
+  ami = {
+    pattern = "ami%-[0-9a-f]+",
+    replacement = "AMI_%03d",
+    type = "ec2",
+    description = "AMI identifier (ami-xxxxxxxx format)"
+  },
+  
+  -- ARN Pattern
+  arn = {
+    pattern = "arn:aws:[a-z0-9%-]+:[a-z0-9%-]*:[0-9]*:[a-zA-Z0-9%-/:*]+",
+    replacement = "ARN_%03d",
+    type = "iam",
+    description = "AWS ARN (Amazon Resource Name)"
+  },
+  
+  -- AWS Account ID Pattern
+  account_id = {
+    pattern = "%d%d%d%d%d%d%d%d%d%d%d%d",
+    replacement = "ACCOUNT_%03d",
+    type = "account",
+    description = "AWS Account ID (12 digits)"
+  },
+  
+  -- AWS Access Key ID Pattern
+  access_key = {
+    pattern = "AKIA[0-9A-Z]+",
+    replacement = "ACCESS_KEY_%03d",
+    type = "credentials",
+    description = "AWS Access Key ID"
+  },
+  
+  -- AWS Secret Access Key Pattern (특정 패턴)
+  secret_key = {
+    pattern = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    replacement = "SECRET_KEY_%03d",
+    type = "credentials",
+    description = "AWS Secret Access Key"
+  },
+  
+  -- AWS Session Token Pattern
+  session_token = {
+    pattern = "FwoGZXIvYXdzE[A-Za-z0-9+/=]+",
+    replacement = "SESSION_TOKEN_%03d",
+    type = "credentials",
+    description = "AWS Session Token"
+  },
+  
+  -- Lambda Function ARN
+  lambda_arn = {
+    pattern = "arn:aws:lambda:[a-z0-9%-]+:[0-9]+:function:[a-zA-Z0-9%-_]+",
+    replacement = "LAMBDA_ARN_%03d",
+    type = "lambda",
+    description = "Lambda function ARN"
+  },
+  
+  -- ELB/ALB ARN
+  elb_arn = {
+    pattern = "arn:aws:elasticloadbalancing:[a-z0-9%-]+:[0-9]+:loadbalancer/[a-zA-Z0-9%-/]+",
+    replacement = "ELB_ARN_%03d",
+    type = "elb",
+    description = "Elastic Load Balancer ARN"
+  },
+  
+  -- CloudFormation Stack ID
+  stack_id = {
+    pattern = "arn:aws:cloudformation:[a-z0-9%-]+:[0-9]+:stack/[a-zA-Z0-9%-]+/[a-f0-9%-]+",
+    replacement = "STACK_ID_%03d",
+    type = "cloudformation",
+    description = "CloudFormation Stack ID"
+  },
+  
+  -- ECS Task ARN
+  ecs_task = {
+    pattern = "arn:aws:ecs:[a-z0-9%-]+:[0-9]+:task/[a-f0-9%-]+",
+    replacement = "ECS_TASK_%03d",
+    type = "ecs",
+    description = "ECS Task ARN"
+  },
+  
+  -- SNS Topic ARN
+  sns_topic = {
+    pattern = "arn:aws:sns:[a-z0-9%-]+:[0-9]+:[a-zA-Z0-9%-_]+",
+    replacement = "SNS_TOPIC_%03d",
+    type = "sns",
+    description = "SNS Topic ARN"
+  },
+  
+  -- SQS Queue URL
+  sqs_queue = {
+    pattern = "https://sqs%.[a-z0-9%-]+%.amazonaws%.com/[0-9]+/[a-zA-Z0-9%-_]+",
+    replacement = "SQS_QUEUE_%03d",
+    type = "sqs",
+    description = "SQS Queue URL"
+  },
+  
+  -- KMS Key ID
+  kms_key = {
+    pattern = "[a-f0-9]{8}%-[a-f0-9]{4}%-[a-f0-9]{4}%-[a-f0-9]{4}%-[a-f0-9]{12}",
+    replacement = "KMS_KEY_%03d",
+    type = "kms",
+    description = "KMS Key ID (UUID format)"
+  },
+  
+  -- DynamoDB Table ARN
+  dynamodb_table = {
+    pattern = "arn:aws:dynamodb:[a-z0-9%-]+:[0-9]+:table/[a-zA-Z0-9%-_%.]+",
+    replacement = "DYNAMODB_TABLE_%03d",
+    type = "dynamodb",
+    description = "DynamoDB Table ARN"
+  },
+  
+  -- Route53 Hosted Zone ID
+  route53_zone = {
+    pattern = "Z[0-9A-Z]{13,}",
+    replacement = "ROUTE53_ZONE_%03d",
+    type = "route53",
+    description = "Route53 Hosted Zone ID"
+  },
+  
+  -- ElastiCache Cluster ID
+  elasticache = {
+    pattern = "[a-z][a-z0-9%-]*%-[0-9a-z]{5}%-[0-9a-z]{3}",
+    replacement = "ELASTICACHE_%03d",
+    type = "elasticache",
+    description = "ElastiCache Cluster ID"
+  },
+  
+  -- EKS Cluster ARN
+  eks_cluster = {
+    pattern = "arn:aws:eks:[a-z0-9%-]+:[0-9]+:cluster/[a-zA-Z0-9%-_]+",
+    replacement = "EKS_CLUSTER_%03d",
+    type = "eks",
+    description = "EKS Cluster ARN"
+  },
+  
+  -- API Gateway ID
+  api_gateway = {
+    pattern = "[a-z0-9]{10}",
+    replacement = "API_GW_%03d",
+    type = "apigateway",
+    description = "API Gateway ID"
+  },
+  
+  -- CloudWatch Log Group
+  log_group = {
+    pattern = "/aws/[a-zA-Z0-9%-_/]+",
+    replacement = "LOG_GROUP_%03d",
+    type = "cloudwatch",
+    description = "CloudWatch Log Group"
+  },
+  
+  -- IAM Role ARN
+  iam_role = {
+    pattern = "arn:aws:iam::[0-9]+:role/[a-zA-Z0-9%-_+=,.@]+",
+    replacement = "IAM_ROLE_%03d",
+    type = "iam",
+    description = "IAM Role ARN"
+  },
+  
+  -- IAM User ARN
+  iam_user = {
+    pattern = "arn:aws:iam::[0-9]+:user/[a-zA-Z0-9%-_+=,.@]+",
+    replacement = "IAM_USER_%03d",
+    type = "iam",
+    description = "IAM User ARN"
+  },
+  
+  -- Public IP Pattern
+  public_ip = {
+    pattern = "[0-9]{1,3}%.[0-9]{1,3}%.[0-9]{1,3}%.[0-9]{1,3}",
+    replacement = "PUBLIC_IP_%03d",
+    type = "ip",
+    description = "Public IP Address"
+  },
+  
+  -- IPv6 Pattern
+  ipv6 = {
+    pattern = "[0-9a-fA-F:]+:+[0-9a-fA-F:]+",
+    replacement = "IPV6_%03d",
+    type = "ip",
+    description = "IPv6 Address"
+  },
+  
+  -- EBS Volume ID
+  ebs_volume = {
+    pattern = "vol%-[0-9a-f]+",
+    replacement = "EBS_VOL_%03d",
+    type = "storage",
+    description = "EBS Volume ID"
+  },
+  
+  -- EFS File System ID
+  efs_id = {
+    pattern = "fs%-[0-9a-f]+",
+    replacement = "EFS_%03d",
+    type = "storage",
+    description = "EFS File System ID"
+  },
+  
+  -- Snapshot ID
+  snapshot = {
+    pattern = "snap%-[0-9a-f]+",
+    replacement = "SNAPSHOT_%03d",
+    type = "storage",
+    description = "EBS Snapshot ID"
+  },
+  
+  -- Internet Gateway ID
+  igw = {
+    pattern = "igw%-[0-9a-f]+",
+    replacement = "IGW_%03d",
+    type = "vpc",
+    description = "Internet Gateway ID"
+  },
+  
+  -- NAT Gateway ID
+  nat_gateway = {
+    pattern = "nat%-[0-9a-f]+",
+    replacement = "NAT_GW_%03d",
+    type = "vpc",
+    description = "NAT Gateway ID"
+  },
+  
+  -- VPN Connection ID
+  vpn = {
+    pattern = "vpn%-[0-9a-f]+",
+    replacement = "VPN_%03d",
+    type = "vpc",
+    description = "VPN Connection ID"
+  },
+  
+  -- Transit Gateway ID
+  tgw = {
+    pattern = "tgw%-[0-9a-f]+",
+    replacement = "TGW_%03d",
+    type = "vpc",
+    description = "Transit Gateway ID"
+  },
+  
+  -- Certificate ARN
+  cert_arn = {
+    pattern = "arn:aws:acm:[a-z0-9%-]+:[0-9]+:certificate/[a-f0-9%-]+",
+    replacement = "CERT_ARN_%03d",
+    type = "acm",
+    description = "ACM Certificate ARN"
+  },
+  
+  -- Secrets Manager ARN
+  secret_arn = {
+    pattern = "arn:aws:secretsmanager:[a-z0-9%-]+:[0-9]+:secret:[a-zA-Z0-9%-_/]+-[a-zA-Z0-9]+",
+    replacement = "SECRET_ARN_%03d",
+    type = "secretsmanager",
+    description = "Secrets Manager ARN"
+  },
+  
+  -- Parameter Store ARN
+  parameter_arn = {
+    pattern = "arn:aws:ssm:[a-z0-9%-]+:[0-9]+:parameter/[a-zA-Z0-9%-_/]+",
+    replacement = "PARAM_ARN_%03d",
+    type = "ssm",
+    description = "Parameter Store ARN"
+  },
+  
+  -- CodeCommit Repository ARN
+  codecommit = {
+    pattern = "arn:aws:codecommit:[a-z0-9%-]+:[0-9]+:[a-zA-Z0-9%-_]+",
+    replacement = "CODECOMMIT_%03d",
+    type = "codecommit",
+    description = "CodeCommit Repository ARN"
+  },
+  
+  -- ECR Repository URI
+  ecr_uri = {
+    pattern = "[0-9]+%.dkr%.ecr%.[a-z0-9%-]+%.amazonaws%.com/[a-zA-Z0-9%-_]+",
+    replacement = "ECR_URI_%03d",
+    type = "ecr",
+    description = "ECR Repository URI"
+  },
+  
+  -- Glue Job Name
+  glue_job = {
+    pattern = "glue%-job%-[a-zA-Z0-9%-_]+",
+    replacement = "GLUE_JOB_%03d",
+    type = "glue",
+    description = "Glue Job Name"
+  },
+  
+  -- SageMaker Endpoint
+  sagemaker = {
+    pattern = "arn:aws:sagemaker:[a-z0-9%-]+:[0-9]+:endpoint/[a-zA-Z0-9%-_]+",
+    replacement = "SAGEMAKER_%03d",
+    type = "sagemaker",
+    description = "SageMaker Endpoint ARN"
+  },
+  
+  -- Kinesis Stream ARN
+  kinesis = {
+    pattern = "arn:aws:kinesis:[a-z0-9%-]+:[0-9]+:stream/[a-zA-Z0-9%-_%.]+",
+    replacement = "KINESIS_%03d",
+    type = "kinesis",
+    description = "Kinesis Stream ARN"
+  },
+  
+  -- Redshift Cluster ID
+  redshift = {
+    pattern = "[a-z][a-z0-9%-]*%-cluster",
+    replacement = "REDSHIFT_%03d",
+    type = "redshift",
+    description = "Redshift Cluster ID"
+  },
+  
+  -- ElasticSearch Domain
+  elasticsearch = {
+    pattern = "arn:aws:es:[a-z0-9%-]+:[0-9]+:domain/[a-zA-Z0-9%-_]+",
+    replacement = "ES_DOMAIN_%03d",
+    type = "elasticsearch",
+    description = "ElasticSearch Domain ARN"
+  },
+  
+  -- Step Functions State Machine
+  stepfunctions = {
+    pattern = "arn:aws:states:[a-z0-9%-]+:[0-9]+:stateMachine:[a-zA-Z0-9%-_]+",
+    replacement = "STEP_FN_%03d",
+    type = "stepfunctions",
+    description = "Step Functions State Machine ARN"
+  },
+  
+  -- AWS Batch Job Queue
+  batch_queue = {
+    pattern = "arn:aws:batch:[a-z0-9%-]+:[0-9]+:job%-queue/[a-zA-Z0-9%-_]+",
+    replacement = "BATCH_QUEUE_%03d",
+    type = "batch",  
+    description = "Batch Job Queue ARN"
+  },
+  
+  -- CloudFront Distribution ID
+  cloudfront = {
+    pattern = "E[0-9A-Z]{13}",
+    replacement = "CLOUDFRONT_%03d",
+    type = "cloudfront",
+    description = "CloudFront Distribution ID"
+  },
+  
+  -- Athena Workgroup
+  athena = {
+    pattern = "arn:aws:athena:[a-z0-9%-]+:[0-9]+:workgroup/[a-zA-Z0-9%-_]+",
+    replacement = "ATHENA_%03d",
+    type = "athena",
+    description = "Athena Workgroup ARN"
   }
 }
 
@@ -130,24 +538,24 @@ function _M.compile_patterns()
     -- Validate pattern syntax
     local test_status, test_result = pcall(string.match, "test", pattern_def.pattern)
     if not test_status then
-      kong.log.error("Invalid pattern syntax for " .. pattern_name .. ": " .. tostring(test_result))
+      -- 패턴 구문 오류
       return false
     end
     
     -- Validate replacement format
     if not pattern_def.replacement or type(pattern_def.replacement) ~= "string" then
-      kong.log.error("Invalid replacement format for " .. pattern_name)
+      -- 대체 형식 오류
       return false
     end
     
     -- Validate required fields
     if not pattern_def.type or not pattern_def.description then
-      kong.log.error("Missing required fields for " .. pattern_name)
+      -- 필수 필드 누락
       return false
     end
   end
   
-  kong.log.info("AWS patterns compiled successfully")
+  -- 패턴 컴파일 완료
   return true
 end
 

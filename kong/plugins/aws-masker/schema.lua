@@ -69,6 +69,15 @@ return {
               default = false,
               description = "Enable logging of requests that contain masked content (security audit trail)"
             }
+          },
+          
+          -- API Authentication Configuration
+          {
+            anthropic_api_key = {
+              type = "string",
+              required = false,
+              description = "Anthropic API key for authentication (if not provided in request headers)"
+            }
           }
         }
       }

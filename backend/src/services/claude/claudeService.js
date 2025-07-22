@@ -114,15 +114,11 @@ class ClaudeService {
       const claudeRequest = {
         model: this.model,
         max_tokens: options.maxTokens || 2048,
+        system: options.systemPrompt || 'You are a helpful AWS infrastructure analysis assistant.',
         messages: [{
           role: 'user',
           content: prompt
-        }],
-        metadata: {
-          analysis_type: options.analysisType || 'security_and_optimization',
-          resource_count: this.countResources(awsData),
-          timestamp: new Date().toISOString()
-        }
+        }]
       };
       
       // Send request through Kong Gateway (masking will be handled by Kong plugin)
@@ -382,6 +378,7 @@ For each opportunity, provide:
       const testRequest = {
         model: this.model,
         max_tokens: 50,
+        system: 'You are a helpful assistant for testing connectivity.',
         messages: [{
           role: 'user',
           content: 'Please respond with "Connection test successful" to confirm API connectivity.'

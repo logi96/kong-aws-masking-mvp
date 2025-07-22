@@ -5,27 +5,45 @@
 
 ## 📊 수정된 현재 상태 분석 (METRIC)
 - **현재 구현된 패턴**: 5개 (EC2, Private IP, S3, RDS)
-- **실제 마스킹 대상**: Claude API `messages[0].content` 텍스트 필드
+- **실제 마스킹 대상**: Claude API 다중 필드 (아래 참조)
 - **패턴 정확도**: ~70% (복합 텍스트에서 false positive 발생)
 - **복합 패턴 테스트**: ❌ **미구현** (중요한 누락사항)
 
-### 핵심 발견사항
-실제 데이터 플로우에서 마스킹 대상은:
+### 핵심 발견사항 (claude-api-masking-strategy.md 기반)
+실제 Claude API에서 마스킹이 필요한 모든 필드:
 ```json
 {
-  "messages": [{
-    "role": "user",
-    "content": "Please analyze AWS infrastructure: EC2 i-123..., S3 my-bucket, IP 10.0.1.100..."
-  }]
+  "system": "Analyzing AWS account 123456789012",  // 시스템 프롬프트도 마스킹 필요
+  "messages": [
+    {
+      "role": "user",
+      "content": "Check EC2 i-123..."  // 단순 문자열
+    },
+    {
+      "role": "assistant", 
+      "content": "Found instance EC2_001..."  // assistant 메시지도 처리
+    },
+    {
+      "role": "user",
+      "content": [  // 멀티모달 배열
+        {"type": "text", "text": "Instance i-123 issue"},  // text 타입만 마스킹
+        {"type": "image", "source": {...}}  // 이미지는 제외
+      ]
+    }
+  ],
+  "tools": [{"description": "Access S3 bucket my-data"}]  // 도구 설명도 확인
 }
 ```
+
+**참조**: [claude-api-masking-strategy.md](./claude-api-masking-strategy.md) - Claude API 공식 문서 분석
 
 ## 📋 수정된 확장 계획 (PLAN)
 
 ### Phase 1: 복합 텍스트 패턴 매칭 엔진 (1주차)
 
-#### 1.1 단순화된 텍스트 마스킹 엔진
+#### 1.1 단순화된 텍스트 마스킹 엔진 (Claude API 구조 대응)
 **파일**: `/kong/plugins/aws-masker/text_masker_v2.lua`
+**참조**: [claude-api-masking-strategy.md#케이스별-처리-로직](./claude-api-masking-strategy.md#케이스별-처리-로직)
 
 ```lua
 local text_masker = {}
@@ -224,15 +242,45 @@ function text_masker.unmask_text(text)
     return unmasked_text
 end
 
--- Claude 요청 마스킹
+-- Claude 요청 마스킹 (모든 필드 처리)
 function text_masker.mask_claude_request(body, config)
     local data = cjson.decode(body)
+    local total_masked = 0
     
-    if data.messages and data.messages[1] and data.messages[1].content then
-        local original_content = data.messages[1].content
-        local masked_content, context = text_masker.mask_text(original_content, ngx.var.request_id)
-        
-        data.messages[1].content = masked_content
+    -- 1. System 프롬프트 마스킹
+    if data.system then
+        data.system, count = text_masker.mask_text(data.system, ngx.var.request_id)
+        total_masked = total_masked + count
+    end
+    
+    -- 2. Messages 배열 처리 (모든 role)
+    if data.messages then
+        for i, message in ipairs(data.messages) do
+            -- 문자열 content
+            if type(message.content) == "string" then
+                message.content, count = text_masker.mask_text(message.content, ngx.var.request_id)
+                total_masked = total_masked + count
+            -- 멀티모달 content 배열
+            elseif type(message.content) == "table" then
+                for j, content_item in ipairs(message.content) do
+                    if content_item.type == "text" and content_item.text then
+                        content_item.text, count = text_masker.mask_text(content_item.text, ngx.var.request_id)
+                        total_masked = total_masked + count
+                    end
+                end
+            end
+        end
+    end
+    
+    -- 3. Tools 설명 (선택적)
+    if data.tools then
+        for i, tool in ipairs(data.tools) do
+            if tool.description then
+                tool.description, count = text_masker.mask_text(tool.description, ngx.var.request_id)
+                total_masked = total_masked + count
+            end
+        end
+    end
         
         kong.log.info("Claude request masked", {
             original_length = #original_content,
@@ -321,7 +369,8 @@ return aws_masker
 
 ### Phase 2: Enhanced Multi-Pattern Test Suite (1주차)
 
-✅ **이미 작성 완료**: `enhanced-pattern-test-plan.md`
+✅ **이미 작성 완료**: [enhanced-pattern-test-plan.md](./enhanced-pattern-test-plan.md)
+**추가 필요**: Claude API 구조별 테스트 케이스 (참조: [claude-api-masking-strategy.md#특수-케이스-처리](./claude-api-masking-strategy.md#특수-케이스-처리))
 
 **핵심 개선사항**:
 1. **실제 Claude content 시뮬레이션**: 긴 분석 텍스트 형태
@@ -358,6 +407,10 @@ priority_3_patterns = {
 
 ## 🎯 수정된 성공 기준 (SUCCESS CRITERIA)
 
+**참조 문서**:
+- [critical-design-review-report.md](./critical-design-review-report.md) - 보안 요구사항
+- [integrated-secure-implementation-plan.md](./integrated-secure-implementation-plan.md) - 통합 실행 계획
+
 ### 기술적 지표
 - ✅ **복합 패턴 정확도**: 95% (여러 패턴 혼재 시)
 - ✅ **패턴 간섭 방지**: 0% (패턴 간 잘못된 매칭 없음)
@@ -385,6 +438,17 @@ priority_3_patterns = {
 1. **프로덕션 시뮬레이션**: 실제 Claude API 데이터로 테스트
 2. **성능 벤치마크**: 다양한 크기와 복잡도 텍스트
 3. **안전 배포**: 롤링 업데이트 및 모니터링
+
+## 🔗 관련 문서 참조
+
+### 필수 참조 문서
+1. **[claude-api-masking-strategy.md](./claude-api-masking-strategy.md)** - Claude API 공식 문서 기반 마스킹 전략
+2. **[enhanced-pattern-test-plan.md](./enhanced-pattern-test-plan.md)** - 복합 패턴 테스트 설계
+3. **[critical-design-review-report.md](./critical-design-review-report.md)** - 보안 위험 분석 및 대응
+4. **[integrated-secure-implementation-plan.md](./integrated-secure-implementation-plan.md)** - 전체 구현 로드맵
+
+### 실행 순서
+참조: [document-dependency-analysis.md](./document-dependency-analysis.md) - 문서 종속성 및 실행 순서 가이드
 
 ## 💡 핵심 개선사항 요약
 

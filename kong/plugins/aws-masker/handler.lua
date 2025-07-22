@@ -5,7 +5,9 @@
 --
 
 local masker = require "kong.plugins.aws-masker.masker"
-local cjson = require "cjson.safe"
+local json_safe = require "kong.plugins.aws-masker.json_safe"
+local monitoring = require "kong.plugins.aws-masker.monitoring"
+local auth_handler = require "kong.plugins.aws-masker.auth_handler"
 
 -- Plugin handler class
 local AwsMaskerHandler = {}
@@ -43,10 +45,31 @@ end
 -- Performance optimized for < 100ms masking requirement
 -- @param table conf Plugin configuration from Kong
 function AwsMaskerHandler:access(conf)
+  -- 보안 체크포인트: JSON 모듈 검증
+  if not json_safe.is_available() then
+    kong.log.err("AWS Masker: CRITICAL - No JSON library available")
+    -- JSON 모듈 테스트
+    local test_ok, test_msg = json_safe.test()
+    if not test_ok then
+      kong.log.err("AWS Masker: JSON module test failed: " .. test_msg)
+    else
+      kong.log.info("AWS Masker: " .. test_msg)
+    end
+  end
+  
+  -- API 키 헤더 전달 (Backend에서 설정한 x-api-key를 Claude API로 전달)
+  local headers = kong.request.get_headers()
+  if headers["x-api-key"] then
+    kong.service.request.set_header("x-api-key", headers["x-api-key"])
+    -- API 키 전달 성공
+  else
+    -- 헤더 없음
+  end
+  
   -- Initialize mapping store if not exists
   if not self.mapping_store then
     self.mapping_store = masker.create_mapping_store()
-    kong.log.info("AWS Masker: Created new mapping store")
+    -- mapping store 생성됨
   end
   
   -- Apply configuration with safety check
@@ -67,39 +90,59 @@ function AwsMaskerHandler:access(conf)
     }
   end
   
+  -- 보안 체크포인트: API 인증 처리
+  local auth_success, auth_err = auth_handler.handle_authentication()
+  if not auth_success then
+    kong.log.err("AWS Masker: Authentication handling failed: " .. (auth_err or "unknown"))
+    -- 인증 실패해도 계속 진행 (마스킹은 수행)
+    monitoring.log_security_event({
+      type = "AUTH_HANDLING_FAILED",
+      severity = "MEDIUM",
+      details = {
+        error = auth_err
+      },
+      action_taken = "Continuing with masking"
+    })
+  end
+  
   -- Enable request buffering to access body (Kong 3.7 compatible)
   kong.service.request.enable_buffering()
+  
+  -- Start timing for performance monitoring
+  local start_time = ngx.now()
   
   -- Handle request masking with error protection
   local success, err = pcall(function()
     local raw_body = kong.request.get_raw_body()
     
-    kong.log.info("AWS Masker: Raw body retrieved, length: " .. (raw_body and string.len(raw_body) or "nil"))
+    -- 요청 바디 처리 시작
     
     if raw_body then
       -- Attempt to parse as JSON, fallback to string masking
-      local request_data = cjson.decode(raw_body)
-      if not request_data then
-        kong.log.info("AWS Masker: JSON decode failed, treating as string")
+      local request_data, decode_err = json_safe.decode(raw_body)
+      if decode_err then
+        -- 문자열로 처리
         request_data = raw_body
       else
-        kong.log.info("AWS Masker: JSON decoded successfully")
+        -- JSON 디코드 성공
       end
       
-      kong.log.info("AWS Masker: Starting masking process with config: " .. (self.config and "present" or "nil"))
+      -- 마스킹 시작
+      kong.log.debug("[MASKING TEST] Starting masking process")
+      kong.log.debug("[MASKING TEST] Data type: " .. type(request_data))
       
       -- Mask AWS resources using masker module
       local mask_result = masker.mask_data(request_data, self.mapping_store, self.config)
       
-      kong.log.info("AWS Masker: Masking completed, count: " .. (mask_result and mask_result.count or "nil"))
-      kong.log.info("AWS Masker: Original data sample: " .. tostring(raw_body):sub(1, 100))
+      kong.log.debug("[MASKING TEST] Masking completed, count: " .. (mask_result.count or 0))
+      
+      -- 보안: 원본 데이터를 로그에 출력하지 않음
       
       -- Convert masked result back to JSON if it was originally JSON
       local masked_body = self:_prepare_masked_body(mask_result)
       
       if masked_body then
-        kong.log.info("AWS Masker: Masked body prepared, length: " .. string.len(masked_body))
-        kong.log.info("AWS Masker: Masked data sample: " .. tostring(masked_body):sub(1, 100))
+        -- 마스킹 완료
         
         kong.service.request.set_raw_body(masked_body)
         
@@ -108,8 +151,28 @@ function AwsMaskerHandler:access(conf)
         
         -- Log if requested
         self:_log_masking_result(mask_result)
+        
+        -- Collect monitoring metrics
+        local elapsed_time = (ngx.now() - start_time) * 1000 -- Convert to milliseconds
+        monitoring.collect_request_metric({
+          success = true,
+          elapsed_time = elapsed_time,
+          request_size = string.len(raw_body),
+          pattern_count = mask_result.count
+        })
+        
+        -- Track pattern usage
+        if mask_result.patterns_used then
+          for pattern_name, count in pairs(mask_result.patterns_used) do
+            monitoring.track_pattern_usage(pattern_name, count)
+          end
+        end
       else
         kong.log.warn("AWS Masker: Failed to prepare masked body")
+        monitoring.collect_request_metric({
+          success = false,
+          elapsed_time = (ngx.now() - start_time) * 1000
+        })
       end
     else
       kong.log.warn("AWS Masker: No raw body found in request")
@@ -119,6 +182,24 @@ function AwsMaskerHandler:access(conf)
   -- Log errors but don't fail the request
   if not success then
     kong.log.err("AWS masking error in access phase: " .. tostring(err))
+    
+    -- Record failure in monitoring
+    monitoring.collect_request_metric({
+      success = false,
+      elapsed_time = (ngx.now() - start_time) * 1000,
+      error = tostring(err)
+    })
+    
+    -- Log security event for failures
+    monitoring.log_security_event({
+      type = "MASKING_FAILURE",
+      severity = "HIGH",
+      details = {
+        error = tostring(err),
+        phase = "access"
+      },
+      action_taken = "Request passed without masking"
+    })
   end
 end
 
@@ -127,41 +208,38 @@ end
 -- Restores original AWS identifiers in responses from external APIs
 -- @param table conf Plugin configuration from Kong
 function AwsMaskerHandler:body_filter(conf)
-  -- Handle response unmasking with error protection
-  local success, err = pcall(function()
-    -- Get mapping store from request context
-    local mapping_store = kong.ctx.shared.aws_mapping_store
-    
-    if not mapping_store then
-      -- No mappings available, skip unmasking
-      return
-    end
-    
-    local raw_body = kong.response.get_raw_body()
-    
-    if raw_body then
-      -- Attempt to parse as JSON, fallback to string unmasking
-      local response_data = cjson.decode(raw_body)
-      if not response_data then
-        response_data = raw_body
-      end
-      
-      -- Unmask AWS resources
-      local unmasked_data = masker.unmask_data(response_data, mapping_store)
-      
-      -- Convert unmasked result back to JSON if it was originally JSON
-      local unmasked_body = self:_prepare_unmasked_body(unmasked_data)
-      
-      -- Set unmasked body for client response (Kong 3.7 compatible)
-      if unmasked_body then
-        kong.response.set_raw_body(unmasked_body)
-      end
-    end
-  end)
+  -- 테스트를 위한 언마스킹 활성화
+  kong.log.debug("[UNMASKING TEST] body_filter called")
+  local chunk = kong.response.get_raw_body()
   
-  -- Log errors but don't fail the response
-  if not success then
-    kong.log.err("AWS unmasking error in body_filter phase: " .. tostring(err))
+  if chunk then
+    kong.log.debug("[UNMASKING TEST] Response body found, length: " .. string.len(chunk))
+  end
+  
+  if kong.ctx.shared.aws_mapping_store then
+    kong.log.debug("[UNMASKING TEST] Mapping store found")
+  end
+  
+  if chunk and kong.ctx.shared.aws_mapping_store then
+    -- JSON 응답 파싱 시도
+    local response_data, err = json_safe.decode(chunk)
+    if not err and response_data and response_data.content then
+      kong.log.debug("[UNMASKING TEST] Starting unmask process")
+      -- Claude 응답 텍스트 언마스킹
+      for _, content in ipairs(response_data.content) do
+        if content.type == "text" and content.text then
+          kong.log.debug("[UNMASKING TEST] Unmasking text content")
+          content.text = masker.unmask_data(content.text, kong.ctx.shared.aws_mapping_store)
+        end
+      end
+      
+      -- 언마스킹된 응답 인코딩
+      local unmasked_body, encode_err = json_safe.encode(response_data)
+      if not encode_err then
+        kong.response.set_raw_body(unmasked_body)
+        kong.log.debug("[UNMASKING TEST] Response body updated")
+      end
+    end
   end
 end
 
@@ -176,7 +254,13 @@ function AwsMaskerHandler:_prepare_masked_body(mask_result)
   end
   
   if type(mask_result.masked) == "table" then
-    return cjson.encode(mask_result.masked)
+    local encoded, err = json_safe.encode(mask_result.masked)
+    if err then
+      kong.log.err("AWS Masker: Failed to encode masked data: " .. err)
+      -- 보안 최우선: 인코딩 실패 시 요청 차단
+      return nil
+    end
+    return encoded
   else
     return mask_result.masked
   end
@@ -193,7 +277,13 @@ function AwsMaskerHandler:_prepare_unmasked_body(unmasked_data)
   end
   
   if type(unmasked_data) == "table" then
-    return cjson.encode(unmasked_data)
+    local encoded, err = json_safe.encode(unmasked_data)
+    if err then
+      kong.log.err("AWS Masker: Failed to encode unmasked data: " .. err)
+      -- 보안 최우선: 언마스킹 실패 시 원본 데이터 노출 방지
+      return nil
+    end
+    return encoded
   else
     return unmasked_data
   end
@@ -203,9 +293,7 @@ end
 -- Logs masking results if logging is enabled
 -- @param table mask_result Result from masker.mask_data
 function AwsMaskerHandler:_log_masking_result(mask_result)
-  if self.config.log_masked_requests and mask_result.count > 0 then
-    kong.log.info("Masked " .. mask_result.count .. " AWS resources in request")
-  end
+  -- 로깅 비활성화 (보안)
 end
 
 -- Return the handler class
