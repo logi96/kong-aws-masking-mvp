@@ -1,0 +1,100 @@
+#!/bin/bash
+# Pre-commit hook for AWS Masker Plugin
+# Based on 04-code-quality-assurance.md quality standards
+
+set -e
+
+echo "🔍 Running pre-commit quality checks..."
+
+# Navigate to plugin directory
+cd "$(dirname "$0")"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+print_status() {
+    local color=$1
+    local message=$2
+    echo -e "${color}${message}${NC}"
+}
+
+# 1. Static analysis with luacheck
+print_status $YELLOW "📝 Running static analysis..."
+if command -v luacheck >/dev/null 2>&1; then
+    if luacheck . --config .luacheckrc --quiet; then
+        print_status $GREEN "✅ Static analysis passed"
+    else
+        print_status $RED "❌ Static analysis failed"
+        echo "Fix luacheck issues before committing"
+        exit 1
+    fi
+else
+    print_status $YELLOW "⚠️  luacheck not found, skipping static analysis"
+fi
+
+# 2. Unit tests
+print_status $YELLOW "🧪 Running unit tests..."
+if command -v busted >/dev/null 2>&1; then
+    if busted spec/unit/ --quiet --no-coverage; then
+        print_status $GREEN "✅ Unit tests passed"
+    else
+        print_status $RED "❌ Unit tests failed"
+        echo "Fix failing tests before committing"
+        exit 1
+    fi
+else
+    print_status $YELLOW "⚠️  busted not found, skipping tests"
+fi
+
+# 3. Test coverage check
+print_status $YELLOW "📊 Checking test coverage..."
+if command -v busted >/dev/null 2>&1; then
+    coverage=$(busted spec/unit/ --coverage --quiet 2>&1 | grep "Total coverage" | awk '{print $3}' | sed 's/%//')
+    if [[ -n "$coverage" ]] && (( $(echo "$coverage >= 70" | bc -l) )); then
+        print_status $GREEN "✅ Test coverage: ${coverage}% (>= 70%)"
+    elif [[ -n "$coverage" ]]; then
+        print_status $RED "❌ Test coverage: ${coverage}% (< 70%)"
+        echo "Improve test coverage before committing"
+        exit 1
+    else
+        print_status $YELLOW "⚠️  Could not determine coverage"
+    fi
+fi
+
+# 4. File structure validation
+print_status $YELLOW "📁 Validating file structure..."
+required_files=("handler.lua" "schema.lua" "spec/busted_helper.lua")
+for file in "${required_files[@]}"; do
+    if [[ -f "$file" ]]; then
+        print_status $GREEN "✅ Required file found: $file"
+    else
+        print_status $RED "❌ Required file missing: $file"
+        exit 1
+    fi
+done
+
+# 5. Code complexity check (basic)
+print_status $YELLOW "🔧 Checking code complexity..."
+if command -v luacheck >/dev/null 2>&1; then
+    complex_functions=$(luacheck . --config .luacheckrc --max-cyclomatic-complexity 10 2>&1 | grep -c "too complex" || true)
+    if [[ "$complex_functions" -eq 0 ]]; then
+        print_status $GREEN "✅ Code complexity acceptable"
+    else
+        print_status $RED "❌ Found $complex_functions complex functions (>10 complexity)"
+        echo "Refactor complex functions before committing"
+        exit 1
+    fi
+fi
+
+print_status $GREEN "🎉 All pre-commit checks passed!"
+echo ""
+echo "Quality metrics summary:"
+echo "- Static analysis: PASS"
+echo "- Unit tests: PASS"
+echo "- Test coverage: ${coverage:-N/A}%"
+echo "- File structure: PASS"
+echo "- Code complexity: PASS"

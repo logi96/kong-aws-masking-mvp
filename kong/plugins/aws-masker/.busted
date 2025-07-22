@@ -1,0 +1,10 @@
+return {
+  default = {
+    verbose = true,
+    coverage = true,
+    lpath = "./?.lua;./spec/?.lua",
+    helper = "spec/busted_helper",
+    output = "TAP",
+    exclude_tags = { "slow", "manual" }
+  }
+}

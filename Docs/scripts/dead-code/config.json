@@ -1,0 +1,39 @@
+{
+  "deadCodeDetection": {
+    "sourcePath": "src",
+    "excludePatterns": [
+      "node_modules",
+      "dist",
+      "build",
+      "coverage",
+      ".git"
+    ],
+    "includeTestFiles": true,
+    "backupFilePatterns": [
+      ".bak",
+      ".backup",
+      ".old",
+      ".orig",
+      "~"
+    ],
+    "thresholds": {
+      "minCommentedBlockSize": 3,
+      "codeIndicatorPatterns": [
+        "function",
+        "class",
+        "const",
+        "let",
+        "if",
+        "for",
+        "while",
+        "return"
+      ]
+    },
+    "reporting": {
+      "outputDirectory": "Docs/scripts/dead-code/report",
+      "format": "markdown",
+      "includeCodeSnippets": true,
+      "maxItemsPerSection": 20
+    }
+  }
+}

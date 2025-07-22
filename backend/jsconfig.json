@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "lib": ["ES2022"],
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": false,
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node",
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": "."
+  },
+  "include": [
+    "src/app.js",
+    "src/api/routes/health.js",
+    "src/api/middlewares/errorHandler.js"
+  ],
+  "exclude": [
+    "node_modules/**/*",
+    "coverage/**/*",
+    "tests/**/*",
+    "utils/**/*",
+    "scripts/**/*",
+    "src/services/**/*"
+  ]
+}

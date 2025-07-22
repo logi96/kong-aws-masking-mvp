@@ -1,0 +1,27 @@
+{
+  "date": "2025-07-22T08:08:55.400Z",
+  "project": {
+    "name": "kong-aws-masking-backend",
+    "version": "1.0.0",
+    "dependencies": 13,
+    "devDependencies": 13
+  },
+  "coverage": null,
+  "complexity": {
+    "files": 5,
+    "lines": 1012,
+    "averageLinesPerFile": 202
+  },
+  "targets": {
+    "coverage": {
+      "statements": 70,
+      "branches": 70,
+      "functions": 70,
+      "lines": 70
+    },
+    "complexity": {
+      "maxLinesPerFile": 50,
+      "maxComplexity": 10
+    }
+  }
+}
