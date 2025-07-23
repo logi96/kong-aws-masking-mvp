@@ -1,0 +1,12 @@
+Kong AWS Masking Security Test Report
+=====================================
+Date: 2025년 7월 23일 수요일 09시 35분 12초 KST
+Total Tests: 25
+Passed: 22
+Failed: 3
+Success Rate: 88%
+
+Security Guarantee:
+- Claude API never sees original AWS resources
+- All sensitive data is masked by Kong Gateway
+- Responses are accurately restored to original

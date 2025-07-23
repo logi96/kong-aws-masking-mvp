@@ -11,6 +11,7 @@ const path = require('path');
 // 라우트 및 미들웨어 import
 const { router: healthRouter } = require('./api/routes/health');
 const { router: analyzeRouter } = require('./api/routes/analyze');
+const testMaskingRouter = require('./api/routes/test-masking');
 const monitoringRouter = require('../monitoring-api');
 const { notFoundHandler, globalErrorHandler } = require('./api/middlewares/errorHandler');
 
@@ -55,6 +56,7 @@ function createApp() {
   // 7. API 라우트 등록
   app.use('/health', healthRouter);
   app.use('/analyze', analyzeRouter);
+  app.use('/test-masking', testMaskingRouter);
   app.use('/api/monitoring', monitoringRouter);
   
   // 8. 404 에러 핸들러

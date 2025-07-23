@@ -4,7 +4,7 @@
 -- Following CLAUDE.md: < 5s total response time, security-first design
 --
 
-local masker = require "kong.plugins.aws-masker.masker"
+local masker = require "kong.plugins.aws-masker.masker_ngx_re"
 local json_safe = require "kong.plugins.aws-masker.json_safe"
 local monitoring = require "kong.plugins.aws-masker.monitoring"
 local auth_handler = require "kong.plugins.aws-masker.auth_handler"
@@ -128,13 +128,9 @@ function AwsMaskerHandler:access(conf)
       end
       
       -- 마스킹 시작
-      kong.log.debug("[MASKING TEST] Starting masking process")
-      kong.log.debug("[MASKING TEST] Data type: " .. type(request_data))
       
       -- Mask AWS resources using masker module
       local mask_result = masker.mask_data(request_data, self.mapping_store, self.config)
-      
-      kong.log.debug("[MASKING TEST] Masking completed, count: " .. (mask_result.count or 0))
       
       -- 보안: 원본 데이터를 로그에 출력하지 않음
       
@@ -208,27 +204,17 @@ end
 -- Restores original AWS identifiers in responses from external APIs
 -- @param table conf Plugin configuration from Kong
 function AwsMaskerHandler:body_filter(conf)
-  -- 테스트를 위한 언마스킹 활성화
-  kong.log.debug("[UNMASKING TEST] body_filter called")
+  -- 언마스킹 활성화
   local chunk = kong.response.get_raw_body()
-  
-  if chunk then
-    kong.log.debug("[UNMASKING TEST] Response body found, length: " .. string.len(chunk))
-  end
-  
-  if kong.ctx.shared.aws_mapping_store then
-    kong.log.debug("[UNMASKING TEST] Mapping store found")
-  end
   
   if chunk and kong.ctx.shared.aws_mapping_store then
     -- JSON 응답 파싱 시도
     local response_data, err = json_safe.decode(chunk)
     if not err and response_data and response_data.content then
-      kong.log.debug("[UNMASKING TEST] Starting unmask process")
       -- Claude 응답 텍스트 언마스킹
       for _, content in ipairs(response_data.content) do
         if content.type == "text" and content.text then
-          kong.log.debug("[UNMASKING TEST] Unmasking text content")
+          -- 언마스킹 수행
           content.text = masker.unmask_data(content.text, kong.ctx.shared.aws_mapping_store)
         end
       end
@@ -236,8 +222,10 @@ function AwsMaskerHandler:body_filter(conf)
       -- 언마스킹된 응답 인코딩
       local unmasked_body, encode_err = json_safe.encode(response_data)
       if not encode_err then
+        -- JSON 인코딩 후 슬래시 이스케이프 제거
+        -- cjson이 \/ 로 인코딩한 것을 / 로 복원
+        unmasked_body = unmasked_body:gsub("\\/", "/")
         kong.response.set_raw_body(unmasked_body)
-        kong.log.debug("[UNMASKING TEST] Response body updated")
       end
     end
   end
