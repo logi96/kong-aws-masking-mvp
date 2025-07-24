@@ -27,7 +27,7 @@ test_arn_pattern() {
   echo "원본: $test_text"
   
   # Kong을 통해 테스트
-  local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{

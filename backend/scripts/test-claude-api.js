@@ -29,7 +29,7 @@ async function testClaudeAPI() {
 
   console.log(`✅ API 키 형식 검증 완료: ${apiKey.substring(0, 20)}...`);
   console.log(`🌏 AWS 리전: ${process.env.AWS_REGION}`);
-  console.log(`🚀 Kong 프록시 URL: ${process.env.KONG_PROXY_URL}`);
+  console.log(`🚀 Claude API URL: ${process.env.CLAUDE_API_URL || 'https://api.anthropic.com/v1/messages'}`);
 
   try {
     // Claude Service 로드 및 테스트

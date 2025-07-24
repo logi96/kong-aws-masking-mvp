@@ -12,6 +12,7 @@ const path = require('path');
 const { router: healthRouter } = require('./api/routes/health');
 const { router: analyzeRouter } = require('./api/routes/analyze');
 const testMaskingRouter = require('./api/routes/test-masking');
+const { router: quickMaskTestRouter } = require('./api/routes/quick-mask-test');
 const monitoringRouter = require('../monitoring-api');
 const { notFoundHandler, globalErrorHandler } = require('./api/middlewares/errorHandler');
 
@@ -57,6 +58,7 @@ function createApp() {
   app.use('/health', healthRouter);
   app.use('/analyze', analyzeRouter);
   app.use('/test-masking', testMaskingRouter);
+  app.use('/quick-mask-test', quickMaskTestRouter);
   app.use('/api/monitoring', monitoringRouter);
   
   // 8. 404 에러 핸들러

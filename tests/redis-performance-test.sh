@@ -25,7 +25,7 @@ measure_response_time() {
   for i in $(seq 1 $iterations); do
     local start_time=$(date +%s%3N)  # 밀리초
     
-    local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:     local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
       -H "Content-Type: application/json" \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -d "{
@@ -141,7 +141,7 @@ test_concurrent_performance() {
     {
       local req_start=$(date +%s%3N)
       
-      local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:       local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
         -H "Content-Type: application/json" \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
         -d "{
@@ -273,7 +273,7 @@ test_sustained_load() {
     
     local req_start=$(date +%s%3N)
     
-    local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:     local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
       -H "Content-Type: application/json" \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -d "{

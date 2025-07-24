@@ -27,7 +27,7 @@ echo -e "\n요청 데이터:"
 echo "$TEST_DATA" | jq .
 
 echo -e "\n응답 (Kong을 통해 마스킹됨):"
-RESPONSE=$(curl -s -X POST http://localhost:8000/analyze \
+RESPONSE=$(curl -s -X POST http://localhost:3000/analyze \
   -H "Content-Type: application/json" \
   -d "$TEST_DATA")
 

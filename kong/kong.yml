@@ -1,22 +1,12 @@
 _format_version: "3.0"
 _transform: true
 
-# Kong AWS Masking MVP - Basic DB-less Configuration
-# Following 02_Kong_DB-less_Setup_Guide_2025.md standards
+# Simplified Kong Configuration - Direct masking approach
+# Backend calls Kong endpoint, Kong masks and forwards to Claude
 
 services:
-  - name: backend-api
-    url: http://backend:3000
-    protocol: http
-    retries: 5
-    connect_timeout: 30000
-    write_timeout: 60000
-    read_timeout: 60000
-    tags:
-      - backend
-      - api
-      
-  - name: anthropic-api
+  # Claude API Service
+  - name: claude-api-service
     url: https://api.anthropic.com/v1/messages
     protocol: https
     host: api.anthropic.com
@@ -27,44 +17,14 @@ services:
     write_timeout: 30000
     read_timeout: 30000
     tags:
-      - claude
       - external-api
-    
-routes:
-  - name: analyze-route
-    service: backend-api
-    paths:
-      - /analyze
-    methods:
-      - POST
-    strip_path: false
-    preserve_host: false
-    tags:
-      - aws-analysis
-        
-  - name: health-route
-    service: backend-api
-    paths:
-      - /health
-    methods:
-      - GET
-    strip_path: false
-    tags:
-      - health-check
-          
-  - name: aws-resource-route
-    service: backend-api
-    paths:
-      - /aws
-    methods:
-      - GET
-      - POST
-    strip_path: false
-    tags:
-      - aws-resources
+      - claude
 
-  - name: claude-api-route
-    service: anthropic-api
+# Routes
+routes:
+  # Analyze endpoint - Kong handles masking
+  - name: analyze-claude
+    service: claude-api-service
     paths:
       - /analyze-claude
     methods:
@@ -74,17 +34,44 @@ routes:
     request_buffering: true
     response_buffering: true
     tags:
-      - claude-api
+      - masking-required
+      
+  # Claude proxy endpoint - Backend uses this
+  - name: claude-proxy
+    service: claude-api-service
+    paths:
+      - /claude-proxy/v1/messages
+    methods:
+      - POST
+    strip_path: true
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+    tags:
       - masking-required
 
-# AWS Masker Plugin Configuration
+# Plugins
 plugins:
+  # AWS Masker for analyze endpoint
   - name: aws-masker
-    route: claude-api-route
+    route: analyze-claude
     config:
+      use_redis: true
       mask_ec2_instances: true
       mask_s3_buckets: true
       mask_rds_instances: true
       mask_private_ips: true
       preserve_structure: true
-      log_masked_requests: true
+      log_masked_requests: false
+      
+  # AWS Masker for claude-proxy endpoint
+  - name: aws-masker
+    route: claude-proxy
+    config:
+      use_redis: true
+      mask_ec2_instances: true
+      mask_s3_buckets: true
+      mask_rds_instances: true
+      mask_private_ips: true
+      preserve_structure: true
+      log_masked_requests: false

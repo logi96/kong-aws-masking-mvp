@@ -6,7 +6,6 @@
 'use strict';
 
 const express = require('express');
-const awsService = require('../../services/aws/awsService');
 const claudeService = require('../../services/claude/claudeService');
 const { AppError } = require('../middlewares/errorHandler');
 
@@ -104,30 +103,27 @@ async function handleAnalyzeRequest(req, res, next) {
   const startTime = Date.now();
   
   try {
-    const { resources, options = {} } = req.body;
+    const { resources, context, options = {} } = req.body;
     
-    // Enforce 5-second timeout limit
-    const timeout = Math.min(options.timeout || 5000, 5000);
+    // Set timeout to 30 seconds for Claude API
+    const timeout = Math.min(options.timeout || 30000, 30000);
     const timeoutId = setTimeout(() => {
-      throw new AppError('Request timeout after 5 seconds', 500, 'TIMEOUT_ERROR');
+      throw new AppError('Request timeout after 30 seconds', 500, 'TIMEOUT_ERROR');
     }, timeout);
 
-    let awsResources;
     let analysis;
 
     try {
-      // Step 1: Collect AWS resources
-      console.log('Collecting AWS resources:', resources);
-      awsResources = await awsService.collectResources({
-        resources,
-        region: options.region,
-        skipCache: options.skipCache,
-        timeout: timeout
-      });
-
-      // Step 2: Analyze with Claude API (data will be masked by Kong Gateway)
+      // MODIFIED: Skip AWS CLI execution - use context text directly
+      // This follows user directive: "AWS CLI 실행하라고 한적이 없고"
+      console.log('Analyzing context text with resource types:', resources);
+      
+      // Step 1: Analyze context text with Claude API (data will be masked by Kong Gateway)
       console.log('Sending data to Claude API for analysis');
-      analysis = await claudeService.analyzeAwsData(awsResources, {
+      analysis = await claudeService.analyzeAwsData({
+        contextText: context || 'No context provided',
+        requestedResourceTypes: resources
+      }, {
         analysisType: options.analysisType,
         maxTokens: 2048,
         systemPrompt: options.systemPrompt
@@ -140,11 +136,7 @@ async function handleAnalyzeRequest(req, res, next) {
       
       // Handle specific service errors
       if (error.message.includes('timeout')) {
-        throw new AppError('Request timeout after 5 seconds', 500, 'TIMEOUT_ERROR');
-      }
-      
-      if (error.message.includes('AWS CLI')) {
-        throw new AppError(`AWS service error: ${error.message}`, 500, 'AWS_ERROR');
+        throw new AppError('Request timeout after 30 seconds', 500, 'TIMEOUT_ERROR');
       }
       
       if (error.message.includes('Claude') || error.message.includes('API')) {
@@ -156,27 +148,15 @@ async function handleAnalyzeRequest(req, res, next) {
 
     const duration = Date.now() - startTime;
 
-    // Count total resources
-    const totalResources = Object.values(awsResources).reduce((count, resourceList) => {
-      if (Array.isArray(resourceList)) {
-        return count + resourceList.length;
-      } else if (resourceList && resourceList.data && Array.isArray(resourceList.data)) {
-        return count + resourceList.data.length;
-      }
-      return count;
-    }, 0);
-
-    // Success response
+    // Success response - Only return analysis (no AWS resource collection)
     const response = {
       success: true,
       data: {
-        awsResources,
         analysis
       },
       metadata: {
-        totalResources,
+        contextLength: context ? context.length : 0,
         analysisType: options.analysisType || 'security_and_optimization',
-        region: options.region,
         timestamp: new Date().toISOString()
       },
       timestamp: new Date().toISOString(),

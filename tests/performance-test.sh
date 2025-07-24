@@ -11,7 +11,7 @@ echo "================================================"
 echo -e "\n[1] 간단한 요청 성능 테스트"
 START_TIME=$(date +%s%N | cut -b1-13)
 
-curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern: curl -s -X POST http://localhost:3000/analyze-claude \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -d '{
@@ -31,7 +31,7 @@ echo "응답 시간: ${SIMPLE_TIME}ms"
 echo -e "\n[2] 복잡한 AWS 데이터 성능 테스트"
 START_TIME=$(date +%s%N | cut -b1-13)
 
-curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern: curl -s -X POST http://localhost:3000/analyze-claude \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -d '{
@@ -52,7 +52,7 @@ echo -e "\n[3] 병렬 요청 테스트 (5개 동시)"
 START_TIME=$(date +%s%N | cut -b1-13)
 
 for i in {1..5}; do
-  (curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   (curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{

@@ -22,7 +22,7 @@ test_basic_persistence() {
   echo "테스트 리소스: $test_resource"
   
   # 1단계: 초기 마스킹 수행
-  local response1=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response1=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{
@@ -46,7 +46,7 @@ test_basic_persistence() {
   echo "✅ 초기 마스킹 성공: $test_resource → $masked_id1"
   
   # 2단계: 동일 요청 반복 (일관성 확인)
-  local response2=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response2=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{
@@ -88,7 +88,7 @@ test_restart_persistence() {
   echo "재시작 테스트 리소스: $test_resource"
   
   # 1단계: 마스킹 수행 및 결과 저장
-  local response_before=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response_before=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{
@@ -136,7 +136,7 @@ test_restart_persistence() {
   sleep 5
   
   # 3단계: 재시작 후 동일 요청
-  local response_after=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response_after=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{
@@ -187,7 +187,7 @@ test_multiple_resources_persistence() {
   # 1단계: 모든 리소스 마스킹
   echo "다중 리소스 마스킹 중..."
   for resource in "${test_resources[@]}"; do
-    local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:     local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
       -H "Content-Type: application/json" \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -d "{
@@ -221,7 +221,7 @@ test_multiple_resources_persistence() {
   for resource in "${!resource_mappings[@]}"; do
     local expected_masked="${resource_mappings[$resource]}"
     
-    local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:     local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
       -H "Content-Type: application/json" \
       -H "x-api-key: $ANTHROPIC_API_KEY" \
       -d "{

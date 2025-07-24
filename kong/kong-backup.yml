@@ -1,0 +1,112 @@
+_format_version: "3.0"
+_transform: true
+
+# Kong AWS Masking MVP - Correct API Gateway Pattern
+# Domain-based interception for transparent proxy behavior
+# Following CORRECT-API-GATEWAY-PATTERN.md standards
+
+# External API Services (for interception)
+services:
+  # Claude API Service - for transparent interception
+  - name: claude-api-service
+    url: https://api.anthropic.com
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    retries: 3
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    tags:
+      - external-api
+      - claude
+      - masking-required
+
+  # Backend API Service - for direct Backend calls
+  - name: backend-api-service
+    url: http://backend:3000
+    protocol: http
+    host: backend
+    port: 3000
+    retries: 5
+    connect_timeout: 30000
+    write_timeout: 60000
+    read_timeout: 60000
+    tags:
+      - backend
+      - internal-api
+
+# Routes Configuration
+routes:
+  # Claude API proxy route (for Backend to use)
+  - name: claude-api-proxy
+    service: claude-api-service
+    paths:
+      - /claude-proxy/v1/messages
+    methods:
+      - POST
+    strip_path: true
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+    tags:
+      - claude-proxy
+      - masking-required
+
+  # Backend API routes (internal)
+  - name: backend-analyze
+    service: backend-api-service
+    paths:
+      - /analyze
+    methods:
+      - POST
+    strip_path: false
+    preserve_host: false
+    tags:
+      - backend-api
+      - internal
+
+  - name: backend-health
+    service: backend-api-service
+    paths:
+      - /health
+    methods:
+      - GET
+    strip_path: false
+    preserve_host: false
+    tags:
+      - backend-api
+      - health-check
+
+  - name: backend-test-masking
+    service: backend-api-service
+    paths:
+      - /test-masking
+    methods:
+      - POST
+      - GET
+    strip_path: false
+    preserve_host: false
+    tags:
+      - backend-api
+      - test-endpoint
+
+# Plugin Configuration
+plugins:
+  # AWS Masker for Claude API proxy
+  - name: aws-masker
+    route: claude-api-proxy
+    config:
+      # Core masking settings (only use fields defined in schema)
+      use_redis: true
+      mask_ec2_instances: true
+      mask_s3_buckets: true
+      mask_rds_instances: true
+      mask_private_ips: true
+      preserve_structure: true
+      log_masked_requests: false  # Production: no logging
+
+  # Rate limiting can be added later if needed
+  # Currently disabled as plugin is not enabled in Kong
+
+# Global configuration is handled via environment variables in docker-compose.yml

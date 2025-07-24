@@ -42,7 +42,7 @@ test_kong_redis_integration() {
   
   # 간단한 마스킹 테스트로 Redis 연동 확인
   local test_resource="i-redis-test-12345"
-  local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{
@@ -132,7 +132,7 @@ test_fallback_mechanism() {
   
   # Redis 없이 요청 테스트
   local test_resource="i-fallback-test-67890"
-  local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{
@@ -170,7 +170,7 @@ test_redis_reconnection() {
   sleep 3  # Redis 안정화 대기
   
   local test_resource="i-reconnect-test-11111"
-  local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{

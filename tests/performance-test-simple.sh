@@ -9,7 +9,7 @@ echo "================================================"
 
 # 1. 간단한 요청
 echo -e "\n[1] 간단한 요청 테스트"
-time curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern: time curl -s -X POST http://localhost:3000/analyze-claude \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -d '{
@@ -23,7 +23,7 @@ time curl -s -X POST http://localhost:8000/analyze-claude \
 
 # 2. 복잡한 요청
 echo -e "\n[2] 복잡한 AWS 데이터 테스트"
-time curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern: time curl -s -X POST http://localhost:3000/analyze-claude \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -d '{

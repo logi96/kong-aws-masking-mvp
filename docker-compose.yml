@@ -36,6 +36,11 @@ services:
       KONG_PLUGINS: "aws-masker"
       # API 인증을 위한 환경 변수
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Redis 설정 추가
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
     ports:
       - "8000:8000"  # Proxy port
       - "8001:8001"  # Admin API port
@@ -49,6 +54,9 @@ services:
     networks:
       - frontend
       - backend
+    depends_on:
+      redis:
+        condition: service_healthy
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD", "kong", "health"]
@@ -84,13 +92,16 @@ services:
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      KONG_PROXY_URL: http://kong:8000
+      CLAUDE_API_URL: ${CLAUDE_API_URL:-http://kong:8000/claude-proxy/v1/messages}
+      HTTP_PROXY: http://kong:8000
+      HTTPS_PROXY: http://kong:8000
       REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-5000}
       MAX_RETRIES: ${MAX_RETRIES:-3}
       RETRY_DELAY: ${RETRY_DELAY:-1000}
       ENABLE_MOCK_MODE: ${ENABLE_MOCK_MODE:-false}
       ENABLE_DEBUG_LOGGING: ${ENABLE_DEBUG_LOGGING:-false}
       ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      AWS_TEST_MODE: ${AWS_TEST_MODE:-false}
     ports:
       - "3000:3000"
     volumes:
@@ -104,6 +115,7 @@ services:
       - ./logs/backend:/app/logs
     networks:
       - backend
+      - frontend  # Allow external API access through Kong
     depends_on:
       kong:
         condition: service_healthy
@@ -121,6 +133,58 @@ services:
           memory: 128M
     security_opt:
       - no-new-privileges:true
+
+  # Redis Cache Service (for AWS masking data persistence)
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    hostname: redis
+    command: >
+      redis-server
+      /usr/local/etc/redis/redis.conf
+      --save 60 1 300 10
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfilename "aws-masker.aof"
+      --dir /data
+      --bind 0.0.0.0
+      --protected-mode yes
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+    environment:
+      <<: *common-variables
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_REQUIREPASS: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - backend
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "redis-cli ping || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   # Development database (optional, for future use)
   # postgres:
@@ -148,7 +212,7 @@ networks:
         - subnet: 172.30.0.0/24
   backend:
     driver: bridge
-    internal: true
+    # Removed internal: true to allow external API access
     ipam:
       config:
         - subnet: 172.31.0.0/24
@@ -157,6 +221,8 @@ volumes:
   kong-tmp:
     driver: local
   backend-modules:
+    driver: local
+  redis-data:
     driver: local
   # postgres-data:
   #   driver: local

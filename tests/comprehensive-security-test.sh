@@ -25,7 +25,7 @@ test_pattern() {
   ((total_count++))
   
   # Kong Gateway 호출
-  local response=$(curl -s -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern:   local response=$(curl -s -X POST http://localhost:3000/analyze-claude \
     -H "Content-Type: application/json" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -d "{

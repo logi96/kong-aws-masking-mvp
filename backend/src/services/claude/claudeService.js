@@ -1,6 +1,6 @@
 /**
  * @fileoverview Claude API service for AWS resource analysis
- * @description Handles communication with Claude API through Kong Gateway
+ * @description Handles direct communication with Claude API (Kong transparently intercepts)
  * @author Infrastructure Team 
  * @version 1.0.0
  */
@@ -52,10 +52,10 @@ class ClaudeService {
     this.model = process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022';
     
     /** @type {string} */
-    this.kongUrl = process.env.KONG_PROXY_URL || 'http://localhost:8000';
+    this.claudeApiUrl = process.env.CLAUDE_API_URL || 'https://api.anthropic.com/v1/messages';
     
     /** @type {number} */
-    this.timeout = parseInt(process.env.REQUEST_TIMEOUT, 10) || 5000; // CLAUDE.md: < 5 seconds
+    this.timeout = parseInt(process.env.REQUEST_TIMEOUT, 10) || 30000; // Increased for Claude API response time
     
     /** @type {number} */
     this.maxRetries = parseInt(process.env.MAX_RETRIES, 10) || 3;
@@ -121,7 +121,7 @@ class ClaudeService {
         }]
       };
       
-      // Send request through Kong Gateway (masking will be handled by Kong plugin)
+      // Send request to Claude API (Kong will transparently intercept and mask)
       const response = await this.sendClaudeRequest(claudeRequest);
       
       const duration = Date.now() - startTime;
@@ -163,18 +163,27 @@ class ClaudeService {
   buildAnalysisPrompt(awsData, options) {
     const analysisType = options.analysisType || 'security_and_optimization';
     
-    let prompt = `Please analyze the following AWS infrastructure data for ${analysisType}:\n\n`;
+    let prompt = `Please analyze the following AWS infrastructure context for ${analysisType}:\n\n`;
     
-    // Add resource summaries
-    for (const [resourceType, resources] of Object.entries(awsData)) {
-      if (resources && resources.error) {
-        prompt += `${resourceType.toUpperCase()}: Error collecting data - ${resources.error}\n\n`;
-        continue;
-      }
+    // Handle new data format: contextText and requestedResourceTypes
+    if (awsData.contextText) {
+      prompt += `Context:\n${awsData.contextText}\n\n`;
       
-      const resourceArray = Array.isArray(resources) ? resources : resources.data || [];
-      prompt += `${resourceType.toUpperCase()} Resources (${resourceArray.length} items):\n`;
-      prompt += JSON.stringify(resourceArray, null, 2) + '\n\n';
+      if (awsData.requestedResourceTypes && awsData.requestedResourceTypes.length > 0) {
+        prompt += `Requested Resource Types: ${awsData.requestedResourceTypes.join(', ')}\n\n`;
+      }
+    } else {
+      // Fallback: Handle legacy format if needed
+      for (const [resourceType, resources] of Object.entries(awsData)) {
+        if (resources && resources.error) {
+          prompt += `${resourceType.toUpperCase()}: Error collecting data - ${resources.error}\n\n`;
+          continue;
+        }
+        
+        const resourceArray = Array.isArray(resources) ? resources : resources.data || [];
+        prompt += `${resourceType.toUpperCase()} Resources (${resourceArray.length} items):\n`;
+        prompt += JSON.stringify(resourceArray, null, 2) + '\n\n';
+      }
     }
     
     // Add specific analysis instructions
@@ -261,9 +270,9 @@ For each opportunity, provide:
           messageLength: JSON.stringify(request.messages).length
         });
         
-        // 모든 환경에서 Kong Gateway를 통해 Claude API 호출
+        // Direct Claude API call (Kong transparently intercepts for masking)
         const response = await axios.post(
-          `${this.kongUrl}/analyze-claude`,
+          this.claudeApiUrl,
           request,
           {
             headers: {
@@ -357,7 +366,7 @@ For each opportunity, provide:
     }
     
     if (error.code === 'ECONNREFUSED') {
-      return new Error('Connection refused: Unable to reach Kong Gateway');
+      return new Error('Connection refused: Unable to reach Claude API');
     }
     
     if (error.code === 'TIMEOUT' || error.code === 'ECONNABORTED') {

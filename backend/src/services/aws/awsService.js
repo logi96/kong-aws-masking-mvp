@@ -127,6 +127,12 @@ class AwsService {
    * @private
    */
   async collectResourceType(resourceType, options) {
+    // Check if test mode is enabled (for security testing)
+    if (process.env.AWS_TEST_MODE === 'true') {
+      logger.info('AWS Test Mode: Returning mock data for security testing', { resourceType });
+      return this.getMockDataForResourceType(resourceType);
+    }
+    
     const command = this.buildCommand(resourceType, options);
     const timeout = options.timeout || this.defaultTimeout;
     
@@ -332,6 +338,44 @@ class AwsService {
     }
     
     return stats;
+  }
+  
+  /**
+   * Get mock data for resource type (for security testing only)
+   * @param {string} resourceType - Resource type
+   * @returns {Array} Mock AWS resource data with patterns to be masked
+   * @private
+   */
+  getMockDataForResourceType(resourceType) {
+    const mockData = {
+      ec2: [
+        ["i-1234567890abcdef0", "t2.micro", "running", "10.0.0.1", "54.123.45.67", [{"Key": "Name", "Value": "test-instance"}]],
+        ["i-0987654321fedcba0", "t3.medium", "running", "10.0.0.2", null, [{"Key": "Environment", "Value": "production"}]],
+        ["i-abcdef1234567890", "m5.large", "stopped", "172.16.0.10", null, [{"Key": "Project", "Value": "webapp"}]]
+      ],
+      s3: [
+        ["my-test-bucket.s3.amazonaws.com", "2023-01-15T10:30:00.000Z"],
+        ["data-backup-prod.s3.amazonaws.com", "2023-02-20T08:15:00.000Z"],
+        ["static-assets.s3-ap-northeast-2.amazonaws.com", "2023-03-10T14:45:00.000Z"]
+      ],
+      rds: [
+        ["prod-mysql-db", "db.t3.medium", "mysql", "available", "prod-mysql.rds.amazonaws.com"],
+        ["staging-postgres", "db.m5.large", "postgres", "available", "staging-pg.rds.amazonaws.com"],
+        ["analytics-redshift", "dc2.large", "redshift", "available", "analytics.redshift.amazonaws.com"]
+      ],
+      vpc: [
+        ["vpc-1234567890abcdef0", "10.0.0.0/16", "available", "default"],
+        ["vpc-0987654321fedcba0", "172.16.0.0/16", "available", "production"],
+        ["vpc-abcdef1234567890", "192.168.0.0/16", "available", "development"]
+      ],
+      iam: [
+        [{"UserName": "admin-user", "UserId": "AIDAI2345678901234567", "Arn": "arn:aws:iam::123456789012:user/admin-user"}],
+        [{"UserName": "app-service", "UserId": "AIDAI8901234567890123", "Arn": "arn:aws:iam::123456789012:user/app-service"}],
+        [{"AccessKeyId": "AKIAIOSFODNN7EXAMPLE", "Status": "Active", "CreateDate": "2023-01-01T00:00:00Z"}]
+      ]
+    };
+    
+    return mockData[resourceType] || [];
   }
 }
 

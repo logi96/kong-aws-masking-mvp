@@ -29,7 +29,7 @@ describe('Claude Service Tests', () => {
     process.env = { ...originalEnv };
     process.env.ANTHROPIC_API_KEY = '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';
     process.env.ANTHROPIC_MODEL = 'claude-3-5-sonnet-20241022';
-    process.env.KONG_PROXY_URL = 'http://localhost:8000';
+    process.env.CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
     process.env.REQUEST_TIMEOUT = '10000';
     process.env.MAX_RETRIES = '2';
     process.env.RETRY_DELAY = '500';
@@ -47,19 +47,19 @@ describe('Claude Service Tests', () => {
     test('should initialize with environment variables', () => {
       // Since it's a singleton, we test indirectly through behavior
       expect(process.env.ANTHROPIC_API_KEY).toContain('sk-ant-api03-');
-      expect(process.env.KONG_PROXY_URL).toBe('http://localhost:8000');
+      expect(process.env.CLAUDE_API_URL).toBe('https://api.anthropic.com/v1/messages');
     });
 
     test('should use default values when environment variables not set', () => {
       delete process.env.ANTHROPIC_MODEL;
-      delete process.env.KONG_PROXY_URL;
+      delete process.env.CLAUDE_API_URL;
       delete process.env.REQUEST_TIMEOUT;
       delete process.env.MAX_RETRIES;
       delete process.env.RETRY_DELAY;
 
       // These would be applied during service creation
       expect(process.env.ANTHROPIC_MODEL).toBeUndefined();
-      expect(process.env.KONG_PROXY_URL).toBeUndefined();
+      expect(process.env.CLAUDE_API_URL).toBeUndefined();
     });
   });
 
@@ -133,7 +133,7 @@ describe('Claude Service Tests', () => {
 
       expect(result).toEqual(mockClaudeResponse);
       expect(axios.post).toHaveBeenCalledWith(
-        'http://localhost:8000/analyze-claude',
+        'https://api.anthropic.com/v1/messages',
         expect.objectContaining({
           model: 'claude-3-5-sonnet-20241022',
           max_tokens: 2048,
@@ -142,12 +142,7 @@ describe('Claude Service Tests', () => {
               role: 'user',
               content: expect.stringContaining('AWS infrastructure')
             })
-          ]),
-          metadata: expect.objectContaining({
-            analysis_type: 'security_and_optimization',
-            resource_count: 2,
-            timestamp: expect.any(String)
-          })
+          ])
         }),
         expect.objectContaining({
           headers: expect.objectContaining({

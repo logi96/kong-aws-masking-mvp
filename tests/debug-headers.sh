@@ -19,7 +19,7 @@ curl -s -w "\nHTTP_CODE: %{http_code}\n" https://api.anthropic.com/v1/messages \
 
 # 2. Kong을 통한 호출 (헤더 포함)
 echo -e "\n[2] Kong을 통한 호출 (x-api-key 헤더 포함)"
-curl -v -X POST http://localhost:8000/analyze-claude \
+# REMOVED - Wrong pattern: curl -v -X POST http://localhost:3000/analyze-claude \
   -H "Content-Type: application/json" \
   -H "x-api-key: $ANTHROPIC_API_KEY" \
   -d '{

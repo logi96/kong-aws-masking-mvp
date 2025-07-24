@@ -1,0 +1,39 @@
+🔒 Kong AWS 마스킹 50개 패턴 보안 검증 시작
+📍 아키텍처: Backend API → Kong Gateway → Claude API
+⚠️  보안 최우선: 단 하나의 취약점도 용납 불가
+
+🔍 개별 패턴 보안 테스트 시작...
+
+[1/40] EC2 Instance 테스트 중... ✅ 안전
+[2/40] EC2 Instance 테스트 중... ✅ 안전
+[3/40] AMI 테스트 중... ✅ 안전
+[4/40] EBS Volume 테스트 중... ❌ 위험 - 마스킹 실패!
+[5/40] Snapshot 테스트 중... ✅ 안전
+[6/40] VPC 테스트 중... ✅ 안전
+[7/40] Subnet 테스트 중... ❌ 위험 - 마스킹 실패!
+[8/40] Security Group 테스트 중... ✅ 안전
+[9/40] Internet Gateway 테스트 중... ✅ 안전
+[10/40] NAT Gateway 테스트 중... ✅ 안전
+[11/40] VPN Connection 테스트 중... ✅ 안전
+[12/40] Transit Gateway 테스트 중... ✅ 안전
+[13/40] Private IP (10.x) 테스트 중... ✅ 안전
+[14/40] Private IP (172.x) 테스트 중... ❌ 위험 - 마스킹 실패!
+[15/40] Private IP (192.x) 테스트 중... ✅ 안전
+[16/40] Public IP 테스트 중... ❌ 위험 - 마스킹 실패!
+[17/40] IPv6 테스트 중... ✅ 안전
+[18/40] S3 Bucket 테스트 중... ✅ 안전
+[19/40] S3 Logs 테스트 중... ✅ 안전
+[20/40] EFS 테스트 중... ✅ 안전
+[21/40] RDS Instance 테스트 중... ✅ 안전
+[22/40] ElastiCache 테스트 중... ✅ 안전
+[23/40] AWS Account 테스트 중... ✅ 안전
+[24/40] Access Key 테스트 중... ✅ 안전
+[25/40] Session Token 테스트 중... ✅ 안전
+[26/40] IAM Role ARN 테스트 중... ❌ 위험 - 마스킹 실패!
+[27/40] IAM User ARN 테스트 중... ❌ 위험 - 마스킹 실패!
+[28/40] KMS Key 테스트 중... ❌ 위험 - 마스킹 실패!
+[29/40] Certificate ARN 테스트 중... ❌ 위험 - 마스킹 실패!
+[30/40] Secret ARN 테스트 중... ❌ 위험 - 마스킹 실패!
+[31/40] Lambda ARN 테스트 중... ❌ 위험 - 마스킹 실패!
+[32/40] ECS Task 테스트 중... ❌ 위험 - 마스킹 실패!
+[33/40] EKS Cluster 테스트 중...

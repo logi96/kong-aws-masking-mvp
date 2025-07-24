@@ -78,6 +78,33 @@ return {
               required = false,
               description = "Anthropic API key for authentication (if not provided in request headers)"
             }
+          },
+          
+          -- Redis Storage Configuration
+          {
+            use_redis = {
+              type = "boolean",
+              default = true,
+              description = "Enable Redis storage for masked value mappings (7-day persistence)"
+            }
+          },
+          
+          -- Mapping TTL Configuration
+          {
+            mapping_ttl = {
+              type = "number",
+              default = 604800,  -- 7 days in seconds
+              description = "TTL for masked value mappings in seconds"
+            }
+          },
+          
+          -- Max Entries Configuration
+          {
+            max_entries = {
+              type = "number",
+              default = 10000,
+              description = "Maximum number of masked mappings to store"
+            }
           }
         }
       }

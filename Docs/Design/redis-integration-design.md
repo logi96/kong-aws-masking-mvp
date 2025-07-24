@@ -370,9 +370,112 @@ function _M._memory_get_or_create_masked_id(original_value, pattern_def, mapping
 end
 ```
 
-#### 4.1.5 언마스킹 로직 구현
+#### 4.1.5 Pre-fetch 기반 언마스킹 로직 구현
+
+**⚠️ OpenResty 제약 준수**: body_filter에서 Redis 파이프라인 사용 불가로 인한 2단계 Pre-fetch 전략 적용
+
+**기술적 배경**: 
+- OpenResty body_filter에서 coroutine yield 금지
+- Redis resty.redis의 commit_pipeline()이 yield 호출
+- 따라서 ACCESS에서 준비, BODY_FILTER에서 적용하는 구조로 설계
+
 ```lua
--- 통합 언마스킹 함수
+-- 1단계: ACCESS에서 언마스킹 데이터 준비 (Redis 파이프라인 사용 가능)
+function _M.prepare_unmask_data(request_body, mapping_store)
+  if type(request_body) ~= "string" or request_body == "" then
+    return {}
+  end
+  
+  if mapping_store.type ~= STORE_TYPE_REDIS then
+    return {}  -- 메모리 모드는 기존 방식 사용
+  end
+  
+  local red = mapping_store.redis
+  if not red then
+    red = mapping_store.acquire_connection()
+    if not red then
+      kong.log.warn("Redis unavailable for unmask preparation")
+      return {}
+    end
+    mapping_store.redis = red
+  end
+  
+  local prefix = mapping_store.prefix
+  
+  -- 1. 요청에서 AWS 리소스 추출 (언마스킹 대상 예측)
+  local aws_patterns = {
+    "i%-[0-9a-f]+",         -- EC2 인스턴스 ID  
+    "vpc%-[0-9a-f]+",       -- VPC ID
+    "subnet%-[0-9a-f]+",    -- Subnet ID
+    "sg%-[0-9a-f]+",        -- Security Group ID
+    "arn:aws:[^:]+:[^:]*:[^:]*:[^\\s]+"  -- ARN 패턴
+  }
+  
+  local potential_resources = {}
+  for _, pattern in ipairs(aws_patterns) do
+    for resource in string.gmatch(request_body, pattern) do
+      if not potential_resources[resource] then
+        potential_resources[resource] = true
+      end
+    end
+  end
+  
+  -- 2. 해당 리소스들의 마스킹 ID 조회 (역방향)
+  local unmask_map = {}
+  if next(potential_resources) then
+    red:init_pipeline()
+    
+    local query_order = {}
+    for resource in pairs(potential_resources) do
+      table.insert(query_order, resource)
+      local encoded = ngx.encode_base64(resource)
+      red:get(prefix .. "rev:" .. encoded)  -- 역방향 조회
+    end
+    
+    local results, err = red:commit_pipeline()
+    if not err and results then
+      -- 언마스킹 맵 구성 (masked_id -> original_value)
+      for i, resource in ipairs(query_order) do
+        local masked_id = results[i]
+        if masked_id and masked_id ~= ngx.null then
+          unmask_map[masked_id] = resource
+        end
+      end
+      
+      mapping_store.stats.hits = mapping_store.stats.hits + #results
+      kong.log.debug("Unmask map prepared: ", #query_order, " resources, ", 
+                     table.getn(unmask_map), " mappings found")
+    else
+      kong.log.err("Redis unmask preparation failed: ", err)
+      mapping_store.stats.errors = mapping_store.stats.errors + 1
+    end
+  end
+  
+  return unmask_map
+end
+
+-- 2단계: BODY_FILTER에서 동기 문자열 교체만 수행
+function _M.apply_unmask_data(response_text, unmask_map)
+  if type(response_text) ~= "string" or response_text == "" then
+    return response_text
+  end
+  
+  if not unmask_map or not next(unmask_map) then
+    return response_text
+  end
+  
+  local unmasked_text = response_text
+  
+  -- 단순 동기 문자열 교체 (yield 없음, OpenResty 호환)
+  for masked_id, original_value in pairs(unmask_map) do
+    unmasked_text = string.gsub(unmasked_text, 
+      _M._escape_pattern(masked_id), original_value)
+  end
+  
+  return unmasked_text
+end
+
+-- 하위 호환성을 위한 통합 함수 (메모리 모드 전용)
 function _M.unmask_data(text, mapping_store)
   if type(text) ~= "string" or text == "" then
     return text
@@ -382,83 +485,13 @@ function _M.unmask_data(text, mapping_store)
     return text
   end
   
+  -- Redis 모드는 Pre-fetch 전략만 사용
   if mapping_store.type == STORE_TYPE_REDIS then
-    return _M._redis_unmask_data(text, mapping_store)
+    kong.log.warn("Redis unmask_data called directly - use prepare_unmask_data + apply_unmask_data instead")
+    return text
   else
     return _M._memory_unmask_data(text, mapping_store)
   end
-end
-
--- Redis 언마스킹 구현 (최적화)
-function _M._redis_unmask_data(text, mapping_store)
-  local red = mapping_store.redis
-  if not red then
-    red = mapping_store.acquire_connection()
-    if not red then
-      return text  -- Redis 불가 시 원본 반환
-    end
-    mapping_store.redis = red
-  end
-  
-  local prefix = mapping_store.prefix
-  
-  -- 1. 마스킹된 ID 추출
-  local masked_patterns = {
-    "[A-Z][A-Z0-9_]+_%d+",  -- 일반 패턴 (EC2_001)
-    "i%-[0-9a-f]+",         -- EC2 인스턴스 ID
-    "vpc%-[0-9a-f]+",       -- VPC ID
-    -- 필요시 추가
-  }
-  
-  local masked_ids = {}
-  local id_positions = {}  -- 위치 저장
-  
-  for _, pattern in ipairs(masked_patterns) do
-    for masked_id, pos in string.gmatch(text, "((" .. pattern .. "))()") do
-      if not masked_ids[masked_id] then
-        masked_ids[masked_id] = true
-        table.insert(id_positions, {id = masked_id, pos = pos})
-      end
-    end
-  end
-  
-  -- 2. 일괄 조회 (파이프라인)
-  if next(masked_ids) then
-    red:init_pipeline()
-    
-    local query_order = {}
-    for masked_id in pairs(masked_ids) do
-      table.insert(query_order, masked_id)
-      red:get(prefix .. "map:" .. masked_id)
-    end
-    
-    local results, err = red:commit_pipeline()
-    if err then
-      kong.log.err("Redis pipeline error in unmask: ", err)
-      return text
-    end
-    
-    -- 3. 치환 수행
-    local replacements = {}
-    for i, masked_id in ipairs(query_order) do
-      local original_value = results[i]
-      if original_value and original_value ~= ngx.null then
-        replacements[masked_id] = original_value
-      end
-    end
-    
-    -- 효율적인 치환
-    local unmasked_text = text
-    for masked_id, original_value in pairs(replacements) do
-      unmasked_text = string.gsub(unmasked_text, 
-        _M._escape_pattern(masked_id), 
-        original_value)
-    end
-    
-    return unmasked_text
-  end
-  
-  return text
 end
 
 -- 메모리 언마스킹 (기존 유지)
@@ -502,7 +535,10 @@ function AwsMaskerHandler:new()
 end
 ```
 
-#### 4.2.2 Access Phase 수정
+#### 4.2.2 Access Phase 수정 (Pre-fetch 전략 추가)
+
+**⚠️ 핵심**: Redis 모드에서 언마스킹 Pre-fetch 작업을 ACCESS에서 수행
+
 ```lua
 function AwsMaskerHandler:access(conf)
   -- ... 기존 초기화 코드 ...
@@ -517,7 +553,27 @@ function AwsMaskerHandler:access(conf)
     self.mapping_store = masker.create_mapping_store(store_options)
   end
   
-  -- ... 마스킹 처리 ...
+  -- 요청 바디 마스킹 처리
+  local raw_body = kong.request.get_raw_body()
+  if raw_body then
+    -- 1단계: 기존 마스킹 수행
+    local masked_result = masker.mask_data(raw_body, self.mapping_store, conf)
+    if masked_result and masked_result.masked then
+      kong.service.request.set_raw_body(masked_result.masked)
+    end
+    
+    -- 2단계: Redis 모드인 경우 언마스킹 Pre-fetch 수행
+    if self.mapping_store.type == "redis" then
+      local unmask_map = masker.prepare_unmask_data(raw_body, self.mapping_store)
+      -- Kong context에 언마스킹 데이터 저장 (BODY_FILTER에서 사용)
+      kong.ctx.shared.aws_unmask_map = unmask_map
+      kong.log.debug("Redis unmask pre-fetch completed: ", 
+                     unmask_map and table.getn(unmask_map) or 0, " mappings")
+    end
+  end
+  
+  -- Kong context에 mapping store 저장
+  kong.ctx.shared.aws_mapping_store = self.mapping_store
   
   -- Store 정리 (중요: Connection 반환)
   if self.mapping_store.type == "redis" and self.mapping_store.redis then
@@ -527,7 +583,17 @@ function AwsMaskerHandler:access(conf)
 end
 ```
 
-#### 4.2.3 Body Filter 수정
+**핵심 변경사항**:
+1. **Pre-fetch 실행**: Redis 모드에서 `masker.prepare_unmask_data()` 호출
+2. **Context 저장**: `kong.ctx.shared.aws_unmask_map`에 언마스킹 데이터 저장
+3. **2단계 처리**: 마스킹 + Pre-fetch를 동시에 수행
+4. **성능 최적화**: ACCESS에서 Redis 파이프라인 사용 (yield 허용)
+5. **연결 관리**: ACCESS 완료 후 Redis 연결 즉시 반환
+
+#### 4.2.3 Body Filter 수정 (Pre-fetch 전략 적용)
+
+**⚠️ 중요**: OpenResty body_filter 제약으로 인해 Redis 파이프라인 직접 사용 불가, Pre-fetch 전략 적용
+
 ```lua
 function AwsMaskerHandler:body_filter(conf)
   local chunk = kong.response.get_raw_body()
@@ -535,26 +601,43 @@ function AwsMaskerHandler:body_filter(conf)
   if chunk and kong.ctx.shared.aws_mapping_store then
     local mapping_store = kong.ctx.shared.aws_mapping_store
     
-    -- Redis 연결 재획득 (다른 phase)
-    if mapping_store.type == "redis" and not mapping_store.redis then
-      mapping_store.redis = masker.acquire_redis_connection()
-      if not mapping_store.redis then
-        -- Redis 불가 시 언마스킹 스킵
-        kong.log.warn("Redis unavailable for unmasking")
-        return
+    -- Pre-fetch된 언마스킹 데이터 사용 (ACCESS에서 준비됨)
+    local unmask_map = kong.ctx.shared.aws_unmask_map
+    
+    if mapping_store.type == "redis" then
+      -- Redis 모드: Pre-fetch된 데이터로 동기 언마스킹
+      if unmask_map and next(unmask_map) then
+        local unmasked_chunk = masker.apply_unmask_data(chunk, unmask_map)
+        if unmasked_chunk ~= chunk then
+          kong.response.set_raw_body(unmasked_chunk)
+          kong.log.debug("Redis unmask applied: ", table.getn(unmask_map), " mappings")
+        end
+      else
+        kong.log.debug("No Redis unmask data available")
+      end
+    else
+      -- Memory 모드: 기존 방식 유지 (하위 호환성)
+      local unmasked_chunk = masker.unmask_data(chunk, mapping_store)
+      if unmasked_chunk ~= chunk then
+        kong.response.set_raw_body(unmasked_chunk)
+        kong.log.debug("Memory unmask applied")
       end
     end
     
-    -- ... 언마스킹 처리 ...
-    
-    -- 연결 반환
-    if mapping_store.type == "redis" and mapping_store.redis then
-      masker.release_redis_connection(mapping_store.redis)
-      mapping_store.redis = nil
+    -- 언마스킹 통계 업데이트
+    if mapping_store.stats then
+      mapping_store.stats.unmask_requests = (mapping_store.stats.unmask_requests or 0) + 1
     end
   end
 end
 ```
+
+**핵심 변경사항**:
+1. **Redis 연결 제거**: body_filter에서 Redis 연결 획득/해제 완전 제거
+2. **Pre-fetch 데이터 사용**: `kong.ctx.shared.aws_unmask_map` 사용
+3. **동기 처리**: `masker.apply_unmask_data()` 함수로 단순 문자열 교체만 수행
+4. **하위 호환성**: Memory 모드는 기존 `masker.unmask_data()` 유지
+5. **성능 최적화**: yield 없는 동기 문자열 처리로 OpenResty 호환
 
 ### 4.3 Docker 설정
 

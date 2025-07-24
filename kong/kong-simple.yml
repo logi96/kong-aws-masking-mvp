@@ -1,0 +1,51 @@
+_format_version: "3.0"
+_transform: true
+
+# Simplified Kong Configuration - Direct masking approach
+# Backend calls Kong endpoint, Kong masks and forwards to Claude
+
+services:
+  # Claude API Service
+  - name: claude-api-service
+    url: https://api.anthropic.com/v1/messages
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    path: /v1/messages
+    retries: 3
+    connect_timeout: 5000
+    write_timeout: 30000
+    read_timeout: 30000
+    tags:
+      - external-api
+      - claude
+
+# Routes
+routes:
+  # Analyze endpoint - Kong handles masking
+  - name: analyze-claude
+    service: claude-api-service
+    paths:
+      - /analyze-claude
+    methods:
+      - POST
+    strip_path: true
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+    tags:
+      - masking-required
+
+# Plugins
+plugins:
+  # AWS Masker for analyze endpoint
+  - name: aws-masker
+    route: analyze-claude
+    config:
+      use_redis: true
+      mask_ec2_instances: true
+      mask_s3_buckets: true
+      mask_rds_instances: true
+      mask_private_ips: true
+      preserve_structure: true
+      log_masked_requests: false

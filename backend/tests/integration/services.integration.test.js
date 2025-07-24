@@ -29,7 +29,7 @@ describe('Service Integration Tests', () => {
     process.env.NODE_ENV = 'test';
     process.env.ANTHROPIC_API_KEY = 'sk-ant-api03-test-key-integration';
     process.env.AWS_REGION = 'us-east-1';
-    process.env.KONG_PROXY_URL = 'http://localhost:8000';
+    process.env.CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
   });
 
   describe('AWS Service Integration', () => {
