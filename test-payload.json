@@ -1,0 +1,10 @@
+{
+  "model": "claude-3-5-sonnet-20241022",
+  "max_tokens": 100,
+  "messages": [
+    {
+      "role": "user", 
+      "content": "AWS instance i-1234567890abcdef0에서 S3 버킷 my-test-bucket-12345 접근하려고 합니다. VPC vpc-12345678에서 RDS rds-instance.abc123.us-east-1.rds.amazonaws.com 연결도 필요합니다."
+    }
+  ]
+}

@@ -1,0 +1,233 @@
+version: '3.8'
+
+# Common environment variables
+x-common-variables: &common-variables
+  TZ: ${TZ:-UTC}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+
+# Common healthcheck configuration
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 3s
+  retries: 3
+  start_period: 40s
+
+services:
+  # Kong Gateway Service
+  kong:
+    build:
+      context: .
+      dockerfile: docker/kong/Dockerfile
+      args:
+        KONG_VERSION: 3.7
+    container_name: kong-gateway
+    hostname: kong
+    environment:
+      <<: *common-variables
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: "/opt/kong/kong.yml"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_LISTEN: '0.0.0.0:8001'
+      KONG_PROXY_LISTEN: '0.0.0.0:8000'
+      KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-debug}
+      KONG_PLUGINS: "aws-masker"
+      # API 인증을 위한 환경 변수
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Redis 설정 추가
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+    ports:
+      - "8000:8000"  # Proxy port
+      - "8001:8001"  # Admin API port
+    volumes:
+      # Configuration files
+      - ./kong/kong.yml:/opt/kong/kong.yml:ro
+      # Custom plugins
+      - ./kong/plugins:/usr/local/share/lua/5.1/kong/plugins:ro
+      # Temporary directory
+      - kong-tmp:/tmp
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "kong", "health"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '${KONG_CPU_LIMIT:-0.5}'
+          memory: ${KONG_MEMORY_LIMIT:-512M}
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+
+  # Backend API Service
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+      target: ${BUILD_TARGET:-development}
+      args:
+        NODE_VERSION: 20-alpine
+    container_name: backend-api
+    hostname: backend
+    environment:
+      <<: *common-variables
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      CLAUDE_API_URL: ${CLAUDE_API_URL:-http://kong:8000/claude-proxy/v1/messages}
+      HTTP_PROXY: http://kong:8000
+      HTTPS_PROXY: http://kong:8000
+      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-5000}
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      RETRY_DELAY: ${RETRY_DELAY:-1000}
+      ENABLE_MOCK_MODE: ${ENABLE_MOCK_MODE:-false}
+      ENABLE_DEBUG_LOGGING: ${ENABLE_DEBUG_LOGGING:-false}
+      ENABLE_METRICS: ${ENABLE_METRICS:-true}
+      AWS_TEST_MODE: ${AWS_TEST_MODE:-false}
+    ports:
+      - "3000:3000"
+    volumes:
+      # Source code for development hot reload
+      - ./backend:/app:delegated
+      # Node modules volume for better performance
+      - backend-modules:/app/node_modules
+      # AWS credentials (read-only)
+      - ${HOME}/.aws:/home/api-user/.aws:ro
+      # Logs directory
+      - ./logs/backend:/app/logs
+    networks:
+      - backend
+      - frontend  # Allow external API access through Kong
+    depends_on:
+      kong:
+        condition: service_healthy
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '${BACKEND_CPU_LIMIT:-0.25}'
+          memory: ${BACKEND_MEMORY_LIMIT:-256M}
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+
+  # Redis Cache Service (for AWS masking data persistence)
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    hostname: redis
+    command: >
+      redis-server
+      /usr/local/etc/redis/redis.conf
+      --save 60 1 300 10
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfilename "aws-masker.aof"
+      --dir /data
+      --bind 0.0.0.0
+      --protected-mode yes
+      --tcp-backlog 511
+      --timeout 0
+      --tcp-keepalive 300
+    environment:
+      <<: *common-variables
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_REQUIREPASS: ${REDIS_PASSWORD}
+    volumes:
+      - redis-data:/data
+      - ./kong/plugins/aws-masker/infra/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    networks:
+      - backend
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "redis-cli ping || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 128M
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Development database (optional, for future use)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: postgres-db
+  #   environment:
+  #     POSTGRES_DB: kong
+  #     POSTGRES_USER: kong
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kong}
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #   networks:
+  #     - backend
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: '0.5'
+  #         memory: 512M
+
+networks:
+  frontend:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+  backend:
+    driver: bridge
+    # Removed internal: true to allow external API access
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
+
+volumes:
+  kong-tmp:
+    driver: local
+  backend-modules:
+    driver: local
+  redis-data:
+    driver: local
+  # postgres-data:
+  #   driver: local
+
+# Labels for better organization
+x-labels: &default-labels
+  com.docker.compose.project: "kong-aws-masking-mvp"
+  com.docker.compose.service.type: "infrastructure"
