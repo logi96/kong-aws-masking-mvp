@@ -1,0 +1,54 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Redis data
+redis/data/
+
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test results
+test-results/
+coverage/
+*.test.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.pid
+
+# Docker
+.docker/
+
+# Build artifacts
+dist/
+build/
+
+# Monitoring data
+monitoring/*.json
+monitoring/metrics/
+
+# Backup files
+*.bak
+*.backup
+backup/

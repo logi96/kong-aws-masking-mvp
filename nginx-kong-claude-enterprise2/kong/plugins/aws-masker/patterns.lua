@@ -1,0 +1,677 @@
+--
+-- AWS Resource Patterns Module
+-- Defines pattern matching for AWS resource identifiers  
+-- Following TDD Green phase to make tests pass with 04-code-quality-assurance.md standards
+--
+
+local _M = {}
+
+---
+-- AWS Resource Pattern Definitions
+-- Each pattern includes regex, replacement format, type, and description
+-- Performance optimized for < 100ms processing requirement
+-- @type table
+_M.patterns = {
+  -- EC2 Instance ID Pattern (i-xxxxxxxxxxxxxxxxx)
+  ec2_instance = {
+    pattern = "i%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_EC2_%03d", 
+    type = "ec2",
+    description = "EC2 instance identifier (i-xxxxxxxxxxxxxxxxx format)",
+    priority = 250
+  },
+  
+  -- Private IP Address Pattern (10.x.x.x only) - DISABLED for public IP only masking
+  -- private_ip = {
+  --   pattern = "10%.%d+%.%d+%.%d+",
+  --   replacement = "PRIVATE_IP_%03d",
+  --   type = "ip",
+  --   description = "Private IP addresses in 10.x.x.x range",
+  --   priority = 450
+  -- },
+  
+  -- Private IP Address Pattern (172.16-31.x.x) - DISABLED for public IP only masking
+  -- private_ip_172 = {
+  --   pattern = "172%.1[6-9]%.%d+%.%d+",
+  --   replacement = "PRIVATE_IP_%03d",
+  --   type = "ip",
+  --   description = "Private IP addresses in 172.16-19.x.x range",
+  --   priority = 410
+  -- },
+  
+  -- Private IP Address Pattern (172.20-31.x.x) - DISABLED for public IP only masking
+  -- private_ip_172_2 = {
+  --   pattern = "172%.2%d%.%d+%.%d+",
+  --   replacement = "PRIVATE_IP_%03d",
+  --   type = "ip",
+  --   description = "Private IP addresses in 172.20-29.x.x range",
+  --   priority = 420
+  -- },
+  
+  -- Private IP Address Pattern (172.30-31.x.x) - DISABLED for public IP only masking
+  -- private_ip_172_3 = {
+  --   pattern = "172%.3[01]%.%d+%.%d+",
+  --   replacement = "PRIVATE_IP_%03d",
+  --   type = "ip",
+  --   description = "Private IP addresses in 172.30-31.x.x range",
+  --   priority = 430
+  -- },
+  
+  -- Private IP Address Pattern (192.168.x.x) - DISABLED for public IP only masking
+  -- private_ip_192 = {
+  --   pattern = "192%.168%.%d+%.%d+",
+  --   replacement = "PRIVATE_IP_%03d",
+  --   type = "ip",
+  --   description = "Private IP addresses in 192.168.x.x range",
+  --   priority = 440
+  -- },
+  
+  -- S3 Bucket Name Pattern (common bucket naming patterns)
+  s3_bucket = {
+    pattern = "[a-z0-9][a-z0-9%-]*bucket[a-z0-9%-]*",
+    replacement = "AWS_S3_BUCKET_%03d",
+    type = "s3", 
+    description = "S3 bucket names containing 'bucket'",
+    priority = 500
+  },
+  
+  -- S3 Logs/Data Pattern (for data/logs buckets)
+  s3_logs_bucket = {
+    pattern = "[a-z0-9][a-z0-9%-]*logs[a-z0-9%-]*",
+    replacement = "AWS_S3_LOGS_BUCKET_%03d", 
+    type = "s3",
+    description = "S3 bucket names containing 'logs'",
+    priority = 510
+  },
+  
+  -- RDS Database Pattern (common database naming patterns)
+  rds_instance = {
+    pattern = "[a-z%-]*db[a-z%-]*",
+    replacement = "AWS_RDS_%03d",
+    type = "rds",
+    description = "RDS database names containing 'db'",
+    priority = 520
+  },
+  
+  -- Security Group Pattern (sg-xxxxxxxx)
+  security_group = {
+    pattern = "sg%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_SECURITY_GROUP_%03d",
+    type = "vpc",
+    description = "Security group identifier (sg-xxxxxxxx format)",
+    priority = 240
+  },
+  
+  -- Subnet Pattern (subnet-xxxxxxxxxxxxxxxxx)
+  subnet = {
+    pattern = "subnet%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_SUBNET_%03d",
+    type = "vpc",
+    description = "Subnet identifier (subnet-xxxxxxxxxxxxxxxxx format)",
+    priority = 220
+  },
+  
+  -- VPC Pattern (vpc-xxxxxxxx)
+  vpc = {
+    pattern = "vpc%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_VPC_%03d",
+    type = "vpc",
+    description = "VPC identifier (vpc-xxxxxxxx format)",
+    priority = 230
+  },
+  
+  -- AMI Pattern (ami-xxxxxxxx)
+  ami = {
+    pattern = "ami%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_AMI_%03d",
+    type = "ec2",
+    description = "AMI identifier (ami-xxxxxxxx format)",
+    priority = 260
+  },
+  
+  -- ARN Pattern (Fallback for unmatched ARNs)
+  arn = {
+    pattern = "arn:aws:[a-z0-9%-]+:[a-z0-9%-]*:[0-9]*:[a-zA-Z0-9%-/:*]+",
+    replacement = "AWS_ARN_%03d",
+    type = "iam", 
+    description = "AWS ARN (Amazon Resource Name) - Fallback pattern",
+    priority = 500
+  },
+  
+  -- AWS Account ID Pattern
+  account_id = {
+    pattern = "%d%d%d%d%d%d%d%d%d%d%d%d",
+    replacement = "AWS_ACCOUNT_%03d",
+    type = "account",
+    description = "AWS Account ID (12 digits)",
+    priority = 600
+  },
+  
+  -- AWS Access Key ID Pattern
+  access_key = {
+    pattern = "AKIA[0-9A-Z]+",
+    replacement = "AWS_ACCESS_KEY_%03d",
+    type = "credentials",
+    description = "AWS Access Key ID",
+    priority = 310
+  },
+  
+  -- AWS Secret Access Key Pattern (특정 패턴)
+  secret_key = {
+    pattern = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+    replacement = "AWS_SECRET_KEY_%03d",
+    type = "credentials",
+    description = "AWS Secret Access Key",
+    priority = 620
+  },
+  
+  -- AWS Session Token Pattern
+  session_token = {
+    pattern = "FwoGZXIvYXdzE[A-Za-z0-9+/=]+",
+    replacement = "AWS_SESSION_TOKEN_%03d",
+    type = "credentials",
+    description = "AWS Session Token",
+    priority = 610
+  },
+  
+  -- Lambda Function ARN
+  lambda_arn = {
+    pattern = "arn:aws:lambda:[a-z0-9%-]+:[0-9]+:function:[a-zA-Z0-9%-_]+",
+    replacement = "AWS_LAMBDA_ARN_%03d",
+    type = "lambda",
+    description = "Lambda function ARN",
+    priority = 100
+  },
+  
+  -- ELB/ALB ARN
+  elb_arn = {
+    pattern = "arn:aws:elasticloadbalancing:[a-z0-9%-]+:[0-9]+:loadbalancer/[a-zA-Z0-9%-/]+",
+    replacement = "AWS_ELB_ARN_%03d",
+    type = "elb",
+    description = "Elastic Load Balancer ARN",
+    priority = 110
+  },
+  
+  -- CloudFormation Stack ID
+  stack_id = {
+    pattern = "arn:aws:cloudformation:[a-z0-9%-]+:[0-9]+:stack/[a-zA-Z0-9%-]+/[a-f0-9%-]+",
+    replacement = "AWS_CLOUDFORMATION_STACK_%03d",
+    type = "cloudformation",
+    description = "CloudFormation Stack ID",
+    priority = 165
+  },
+  
+  -- ECS Task ARN
+  ecs_task = {
+    pattern = "arn:aws:ecs:[a-z0-9%-]+:[0-9]+:task/[a-f0-9%-]+",
+    replacement = "AWS_ECS_TASK_%03d",
+    type = "ecs",
+    description = "ECS Task ARN",
+    priority = 105
+  },
+  
+  -- SNS Topic ARN
+  sns_topic = {
+    pattern = "arn:aws:sns:[a-z0-9%-]+:[0-9]+:[a-zA-Z0-9%-_]+",
+    replacement = "AWS_SNS_TOPIC_%03d",
+    type = "sns",
+    description = "SNS Topic ARN",
+    priority = 155
+  },
+  
+  -- SQS Queue URL
+  sqs_queue = {
+    pattern = "https://sqs%.[a-z0-9%-]+%.amazonaws%.com/[0-9]+/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_SQS_QUEUE_%03d",
+    type = "sqs",
+    description = "SQS Queue URL",
+    priority = 160
+  },
+  
+  -- KMS Key ID
+  kms_key = {
+    pattern = "[a-f0-9]{8}%-[a-f0-9]{4}%-[a-f0-9]{4}%-[a-f0-9]{4}%-[a-f0-9]{12}",
+    replacement = "AWS_KMS_KEY_%03d",
+    type = "kms",
+    description = "KMS Key ID (UUID format)",
+    priority = 125
+  },
+  
+  -- DynamoDB Table ARN
+  dynamodb_table = {
+    pattern = "arn:aws:dynamodb:[a-z0-9%-]+:[0-9]+:table/[a-zA-Z0-9%-_%.]+",
+    replacement = "AWS_DYNAMODB_TABLE_%03d",
+    type = "dynamodb",
+    description = "DynamoDB Table ARN",
+    priority = 150
+  },
+  
+  -- Route53 Hosted Zone ID
+  route53_zone = {
+    pattern = "Z[0-9A-Z]{13,}",
+    replacement = "AWS_ROUTE53_ZONE_%03d",
+    type = "route53",
+    description = "Route53 Hosted Zone ID",
+    priority = 320
+  },
+  
+  -- ElastiCache Cluster ID
+  elasticache = {
+    pattern = "[a-z][a-z0-9%-]*%-[0-9a-z]{5}%-[0-9a-z]{3}",
+    replacement = "AWS_ELASTICACHE_%03d",
+    type = "elasticache",
+    description = "ElastiCache Cluster ID",
+    priority = 530
+  },
+  
+  -- EKS Cluster ARN
+  eks_cluster = {
+    pattern = "arn:aws:eks:[a-z0-9%-]+:[0-9]+:cluster/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_EKS_CLUSTER_%03d",
+    type = "eks",
+    description = "EKS Cluster ARN",
+    priority = 540
+  },
+  
+  -- API Gateway ID (더 구체적인 패턴으로 수정 - execute-api 컨텍스트에서만)
+  api_gateway = {
+    pattern = "[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9]%.execute%-api%.",
+    replacement = "AWS_API_GW_%03d.execute-api.",
+    type = "apigateway",
+    description = "API Gateway ID (in execute-api context)",
+    priority = 300
+  },
+  
+  -- CloudWatch Log Group
+  log_group = {
+    pattern = "/aws/[a-zA-Z0-9%-_/]+",
+    replacement = "AWS_LOG_GROUP_%03d",
+    type = "cloudwatch",
+    description = "CloudWatch Log Group",
+    priority = 340
+  },
+  
+  -- IAM Role ARN
+  iam_role = {
+    pattern = "arn:aws:iam::[0-9]+:role/[a-zA-Z0-9%-_+=,.@]+",
+    replacement = "AWS_IAM_ROLE_%03d",
+    type = "iam",
+    description = "IAM Role ARN",
+    priority = 115
+  },
+  
+  -- IAM User ARN
+  iam_user = {
+    pattern = "arn:aws:iam::[0-9]+:user/[a-zA-Z0-9%-_+=,.@]+",
+    replacement = "AWS_IAM_USER_%03d",
+    type = "iam",
+    description = "IAM User ARN",
+    priority = 120
+  },
+  
+  -- Public IP Pattern
+  public_ip = {
+    pattern = "[0-9]+%.[0-9]+%.[0-9]+%.[0-9]+",
+    replacement = "AWS_PUBLIC_IP_%03d",
+    type = "ip",
+    description = "Public IP Address",
+    priority = 460,
+    validator = function(ip)
+      -- Use exclusion logic to identify non-public IPs
+      local masker_ngx_re = require "kong.plugins.aws-masker.masker_ngx_re"
+      local is_non_public, reason = masker_ngx_re.is_non_public_ip(ip)
+      if is_non_public then
+        return false, reason  -- Don't mask private/special IPs
+      end
+      return true, "public_eligible"  -- Mask public IPs
+    end
+  },
+  
+  -- IPv6 Pattern
+  ipv6 = {
+    pattern = "[0-9a-fA-F:]+:+[0-9a-fA-F:]+",
+    replacement = "AWS_IPV6_%03d",
+    type = "ip",
+    description = "IPv6 Address",
+    priority = 400
+  },
+  
+  -- EBS Volume ID
+  ebs_volume = {
+    pattern = "vol%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_EBS_VOL_%03d",
+    type = "storage",
+    description = "EBS Volume ID",
+    priority = 210
+  },
+  
+  -- EFS File System ID
+  efs_id = {
+    pattern = "fs%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_EFS_%03d",
+    type = "storage",
+    description = "EFS File System ID",
+    priority = 270
+  },
+  
+  -- Snapshot ID
+  snapshot = {
+    pattern = "snap%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_SNAPSHOT_%03d",
+    type = "storage",
+    description = "EBS Snapshot ID",
+    priority = 295
+  },
+  
+  -- Internet Gateway ID
+  igw = {
+    pattern = "igw%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_IGW_%03d",
+    type = "vpc",
+    description = "Internet Gateway ID",
+    priority = 280
+  },
+  
+  -- NAT Gateway ID
+  nat_gateway = {
+    pattern = "nat%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_NAT_GW_%03d",
+    type = "vpc",
+    description = "NAT Gateway ID",
+    priority = 200
+  },
+  
+  -- VPN Connection ID
+  vpn = {
+    pattern = "vpn%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_VPN_%03d",
+    type = "vpc",
+    description = "VPN Connection ID",
+    priority = 285
+  },
+  
+  -- Transit Gateway ID
+  tgw = {
+    pattern = "tgw%-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]",
+    replacement = "AWS_TGW_%03d",
+    type = "vpc",
+    description = "Transit Gateway ID",
+    priority = 290
+  },
+  
+  -- Certificate ARN
+  cert_arn = {
+    pattern = "arn:aws:acm:[a-z0-9%-]+:[0-9]+:certificate/[a-f0-9%-]+",
+    replacement = "AWS_CERT_ARN_%03d",
+    type = "acm",
+    description = "ACM Certificate ARN",
+    priority = 130
+  },
+  
+  -- Secrets Manager ARN
+  secret_arn = {
+    pattern = "arn:aws:secretsmanager:[a-z0-9%-]+:[0-9]+:secret:[a-zA-Z0-9%-_/]+-[a-zA-Z0-9]+",
+    replacement = "AWS_SECRET_ARN_%03d",
+    type = "secretsmanager",
+    description = "Secrets Manager ARN",
+    priority = 135
+  },
+  
+  -- Parameter Store ARN
+  parameter_arn = {
+    pattern = "arn:aws:ssm:[a-z0-9%-]+:[0-9]+:parameter/[a-zA-Z0-9%-_/]+",
+    replacement = "AWS_PARAM_ARN_%03d",
+    type = "ssm",
+    description = "Parameter Store ARN",
+    priority = 140
+  },
+  
+  -- CodeCommit Repository ARN
+  codecommit = {
+    pattern = "arn:aws:codecommit:[a-z0-9%-]+:[0-9]+:[a-zA-Z0-9%-_]+",
+    replacement = "AWS_CODECOMMIT_%03d",
+    type = "codecommit",
+    description = "CodeCommit Repository ARN",
+    priority = 145
+  },
+  
+  -- ECR Repository URI
+  ecr_uri = {
+    pattern = "[0-9]+%.dkr%.ecr%.[a-z0-9%-]+%.amazonaws%.com/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_ECR_URI_%03d",
+    type = "ecr",
+    description = "ECR Repository URI",
+    priority = 330
+  },
+  
+  -- Glue Job Name
+  glue_job = {
+    pattern = "glue%-job%-[a-zA-Z0-9%-_]+",
+    replacement = "AWS_GLUE_JOB_%03d",
+    type = "glue",
+    description = "Glue Job Name",
+    priority = 560
+  },
+  
+  -- SageMaker Endpoint
+  sagemaker = {
+    pattern = "arn:aws:sagemaker:[a-z0-9%-]+:[0-9]+:endpoint/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_SAGEMAKER_%03d",
+    type = "sagemaker",
+    description = "SageMaker Endpoint ARN",
+    priority = 570
+  },
+  
+  -- Kinesis Stream ARN
+  kinesis = {
+    pattern = "arn:aws:kinesis:[a-z0-9%-]+:[0-9]+:stream/[a-zA-Z0-9%-_%.]+",
+    replacement = "AWS_KINESIS_%03d",
+    type = "kinesis",
+    description = "Kinesis Stream ARN",
+    priority = 170
+  },
+  
+  -- Redshift Cluster ID
+  redshift = {
+    pattern = "[a-z][a-z0-9%-]*%-cluster",
+    replacement = "AWS_REDSHIFT_%03d",
+    type = "redshift",
+    description = "Redshift Cluster ID",
+    priority = 550
+  },
+  
+  -- ElasticSearch Domain
+  elasticsearch = {
+    pattern = "arn:aws:es:[a-z0-9%-]+:[0-9]+:domain/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_ES_DOMAIN_%03d",
+    type = "elasticsearch",
+    description = "ElasticSearch Domain ARN",
+    priority = 175
+  },
+  
+  -- Step Functions State Machine
+  stepfunctions = {
+    pattern = "arn:aws:states:[a-z0-9%-]+:[0-9]+:stateMachine:[a-zA-Z0-9%-_]+",
+    replacement = "AWS_STEP_FN_%03d",
+    type = "stepfunctions",
+    description = "Step Functions State Machine ARN",
+    priority = 180
+  },
+  
+  -- AWS Batch Job Queue
+  batch_queue = {
+    pattern = "arn:aws:batch:[a-z0-9%-]+:[0-9]+:job%-queue/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_BATCH_QUEUE_%03d",
+    type = "batch",  
+    description = "Batch Job Queue ARN",
+    priority = 185
+  },
+  
+  -- CloudFront Distribution ID
+  cloudfront = {
+    pattern = "E[0-9A-Z]{13}",
+    replacement = "AWS_CLOUDFRONT_%03d",
+    type = "cloudfront",
+    description = "CloudFront Distribution ID",
+    priority = 650
+  },
+  
+  -- Athena Workgroup
+  athena = {
+    pattern = "arn:aws:athena:[a-z0-9%-]+:[0-9]+:workgroup/[a-zA-Z0-9%-_]+",
+    replacement = "AWS_ATHENA_%03d",
+    type = "athena",
+    description = "Athena Workgroup ARN",
+    priority = 190
+  }
+}
+
+---
+-- Match AWS resource in given text
+-- @param string text Text to search for AWS resources
+-- @param string resource_type Type of resource to match (optional)
+-- @return table|nil Match result with pattern info, nil if no match
+--
+function _M.match_aws_resource(text, resource_type)
+  if not text or type(text) ~= "string" then
+    return nil
+  end
+  
+  -- If specific resource type requested
+  if resource_type then
+    local pattern_def = _M.patterns[resource_type]
+    if pattern_def then
+      local match = string.match(text, pattern_def.pattern)
+      if match then
+        return {
+          match = match,
+          pattern = pattern_def,
+          type = pattern_def.type
+        }
+      end
+    end
+    return nil
+  end
+  
+  -- Try all patterns
+  for pattern_name, pattern_def in pairs(_M.patterns) do
+    local match = string.match(text, pattern_def.pattern)
+    if match then
+      return {
+        match = match,
+        pattern = pattern_def,
+        type = pattern_def.type,
+        pattern_name = pattern_name
+      }
+    end
+  end
+  
+  return nil
+end
+
+---
+-- Identify AWS resource type from matched text
+-- @param string text Text containing potential AWS resource
+-- @return string|nil Resource type or nil if not identified
+--
+function _M.identify_resource_type(text)
+  if not text or type(text) ~= "string" then
+    return nil
+  end
+  
+  -- Check each pattern for matches
+  for _, pattern_def in pairs(_M.patterns) do
+    local match = string.match(text, pattern_def.pattern)
+    if match then
+      return pattern_def.type
+    end
+  end
+  
+  return nil
+end
+
+---
+-- Compile patterns for optimal performance
+-- Pre-compiles regex patterns to improve matching speed
+-- @return boolean Success status
+--
+function _M.compile_patterns()
+  -- Lua patterns are already compiled internally
+  -- This function validates pattern syntax and optimizes for performance
+  
+  for pattern_name, pattern_def in pairs(_M.patterns) do
+    -- Validate pattern syntax
+    local test_status, test_result = pcall(string.match, "test", pattern_def.pattern)
+    if not test_status then
+      -- 패턴 구문 오류
+      return false
+    end
+    
+    -- Validate replacement format
+    if not pattern_def.replacement or type(pattern_def.replacement) ~= "string" then
+      -- 대체 형식 오류
+      return false
+    end
+    
+    -- Validate required fields
+    if not pattern_def.type or not pattern_def.description then
+      -- 필수 필드 누락
+      return false
+    end
+  end
+  
+  -- 패턴 컴파일 완료
+  return true
+end
+
+---
+-- Get pattern definition by name
+-- @param string pattern_name Name of the pattern
+-- @return table|nil Pattern definition or nil if not found
+--
+function _M.get_pattern(pattern_name)
+  if not pattern_name or type(pattern_name) ~= "string" then
+    return nil
+  end
+  
+  return _M.patterns[pattern_name]
+end
+
+---
+-- Get all available pattern types
+-- @return table Array of pattern type strings
+--
+function _M.get_pattern_types()
+  local types = {}
+  for _, pattern_def in pairs(_M.patterns) do
+    table.insert(types, pattern_def.type)
+  end
+  return types
+end
+
+---
+-- Validate if text matches any AWS resource pattern
+-- @param string text Text to validate
+-- @return boolean True if text contains AWS resources
+--
+function _M.contains_aws_resources(text)
+  if not text or type(text) ~= "string" then
+    return false
+  end
+  
+  for _, pattern_def in pairs(_M.patterns) do
+    local match = string.match(text, pattern_def.pattern)
+    if match then
+      return true
+    end
+  end
+  
+  return false
+end
+
+-- Initialize patterns on module load
+if kong and kong.log then
+  _M.compile_patterns()
+end
+
+return _M

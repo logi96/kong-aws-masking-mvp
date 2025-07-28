@@ -1,0 +1,7 @@
+{
+  "error": {
+    "message": "The server encountered an error and could not complete your request. Please try again later.",
+    "type": "server_error",
+    "code": "internal_server_error"
+  }
+}

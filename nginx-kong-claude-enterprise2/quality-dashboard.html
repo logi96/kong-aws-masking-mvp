@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kong AWS Masker - Quality Dashboard</title>
+    <style>
+        :root {
+            --primary: #1a73e8;
+            --success: #34a853;
+            --warning: #fbbc04;
+            --danger: #ea4335;
+            --dark: #202124;
+            --light: #f8f9fa;
+            --border: #dadce0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--light);
+            color: var(--dark);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: var(--primary);
+            font-size: 2rem;
+        }
+
+        .subtitle {
+            color: #5f6368;
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .score {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+
+        .score.excellent { color: var(--success); }
+        .score.good { color: #0f9d58; }
+        .score.warning { color: var(--warning); }
+        .score.danger { color: var(--danger); }
+
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background-color: #e0e0e0;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            transition: width 0.5s ease;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .status-badge.success {
+            background-color: #e6f4ea;
+            color: #1e8e3e;
+        }
+
+        .status-badge.warning {
+            background-color: #fef7e0;
+            color: #f9ab00;
+        }
+
+        .status-badge.danger {
+            background-color: #fce8e6;
+            color: #d33b27;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+        }
+
+        .metric-item {
+            padding: 10px;
+            background-color: var(--light);
+            border-radius: 4px;
+        }
+
+        .metric-label {
+            font-size: 0.85rem;
+            color: #5f6368;
+        }
+
+        .metric-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .go-nogo-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .go-nogo-verdict {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin: 20px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .priority-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .priority-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background-color: var(--light);
+            border-radius: 4px;
+            border-left: 4px solid;
+        }
+
+        .priority-item.critical {
+            border-left-color: var(--danger);
+        }
+
+        .priority-item.high {
+            border-left-color: var(--warning);
+        }
+
+        .priority-item.medium {
+            border-left-color: var(--primary);
+        }
+
+        .risk-matrix {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .risk-cell {
+            padding: 15px;
+            text-align: center;
+            border-radius: 4px;
+            color: white;
+            font-weight: 600;
+        }
+
+        .risk-cell.critical { background-color: var(--danger); }
+        .risk-cell.high { background-color: var(--warning); }
+        .risk-cell.medium { background-color: var(--primary); }
+        .risk-cell.low { background-color: var(--success); }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin: 20px 0;
+        }
+
+        #qualityChart {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .timestamp {
+            text-align: right;
+            color: #5f6368;
+            font-size: 0.85rem;
+            margin-top: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Kong AWS Masker Quality Dashboard</h1>
+            <div class="subtitle">Comprehensive Quality Metrics & Go/No-Go Assessment</div>
+        </header>
+
+        <!-- Overall Score Card -->
+        <div class="card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <div class="card-header">
+                <h2 class="card-title" style="color: white;">Overall Quality Score</h2>
+                <div class="score" style="color: white; font-size: 3rem;">78.5%</div>
+            </div>
+            <div class="progress-bar" style="background-color: rgba(255,255,255,0.3);">
+                <div class="progress-fill" style="width: 78.5%; background-color: white;"></div>
+            </div>
+            <p style="text-align: center; margin-top: 10px; font-size: 1.2rem;">Grade: B+ (Good)</p>
+        </div>
+
+        <!-- Go/No-Go Decision -->
+        <div class="go-nogo-section">
+            <h2>Production Deployment Decision</h2>
+            <div class="go-nogo-verdict pulse">CONDITIONAL GO</div>
+            <p style="font-size: 1.1rem;">Proceed with immediate implementation of critical fixes</p>
+            <div style="display: flex; justify-content: center; gap: 20px; margin-top: 20px;">
+                <div style="text-align: left;">
+                    <strong>✅ Ready:</strong> Core functionality, Performance, Monitoring<br>
+                    <strong>❌ Blockers:</strong> Hardcoded credentials, Kong memory limit
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase Assessment Grid -->
+        <div class="dashboard-grid">
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Code Quality</h3>
+                    <span class="score good">75%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 75%; background-color: #0f9d58;"></div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">JSDoc Coverage</div>
+                    <div class="metric-value">75%</div>
+                </div>
+                <div class="status-badge warning">Hardcoded credentials found</div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Test Coverage</h3>
+                    <span class="score warning">58.3%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 58.3%; background-color: var(--warning);"></div>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <div class="metric-label">Unit Tests</div>
+                        <div class="metric-value">0%</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Integration</div>
+                        <div class="metric-value">85%</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Performance</h3>
+                    <span class="score excellent">85%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 85%; background-color: var(--success);"></div>
+                </div>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <div class="metric-label">Response Time</div>
+                        <div class="metric-value">&lt;5s ✅</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-label">Target RPS</div>
+                        <div class="metric-value">1000</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="card-title">Security</h3>
+                    <span class="score excellent">90%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 90%; background-color: var(--success);"></div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">AWS Patterns Masked</div>
+                    <div class="metric-value">50+ types</div>
+                </div>
+                <div class="status-badge success">Fail-secure enabled</div>
+            </div>
+        </div>
+
+        <!-- Risk Matrix -->
+        <div class="card">
+            <h3 class="card-title">Risk Assessment Matrix</h3>
+            <div class="risk-matrix">
+                <div class="risk-cell critical">
+                    <div>Critical (2)</div>
+                    <small>Hardcoded Password<br>Kong Memory</small>
+                </div>
+                <div class="risk-cell high">
+                    <div>High (2)</div>
+                    <small>No CI/CD<br>No Unit Tests</small>
+                </div>
+                <div class="risk-cell medium">
+                    <div>Medium (3)</div>
+                    <small>Auth, Tracing, HA</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Resource Usage -->
+        <div class="card">
+            <h3 class="card-title">Resource Utilization</h3>
+            <div style="margin: 20px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                    <span>Kong Gateway</span>
+                    <span style="color: var(--danger);">97.96%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 97.96%; background-color: var(--danger);"></div>
+                </div>
+            </div>
+            <div style="margin: 20px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                    <span>Redis Cache</span>
+                    <span style="color: var(--success);">0.74%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 0.74%; background-color: var(--success);"></div>
+                </div>
+            </div>
+            <div style="margin: 20px 0;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
+                    <span>Nginx Proxy</span>
+                    <span style="color: var(--success);">4.63%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: 4.63%; background-color: var(--success);"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Priority Actions -->
+        <div class="card">
+            <h3 class="card-title">Improvement Priorities</h3>
+            <ul class="priority-list">
+                <li class="priority-item critical">
+                    <strong>Critical:</strong>&nbsp;Remove hardcoded Redis password (1 hour)
+                </li>
+                <li class="priority-item critical">
+                    <strong>Critical:</strong>&nbsp;Increase Kong memory to 4GB (2 hours)
+                </li>
+                <li class="priority-item high">
+                    <strong>High:</strong>&nbsp;Implement CI/CD pipeline (2 days)
+                </li>
+                <li class="priority-item high">
+                    <strong>High:</strong>&nbsp;Create unit tests - 80% coverage (5 days)
+                </li>
+                <li class="priority-item medium">
+                    <strong>Medium:</strong>&nbsp;Add API authentication (3 days)
+                </li>
+            </ul>
+        </div>
+
+        <!-- Quality Trend Chart -->
+        <div class="card">
+            <h3 class="card-title">Quality Trend Projection</h3>
+            <canvas id="qualityChart" width="400" height="200"></canvas>
+        </div>
+
+        <div class="timestamp">
+            Report Generated: <span id="timestamp"></span> | Auto-refresh: <span id="countdown">300</span>s
+        </div>
+    </div>
+
+    <script>
+        // Set timestamp
+        document.getElementById('timestamp').textContent = new Date().toLocaleString('ko-KR');
+
+        // Countdown timer
+        let countdown = 300;
+        setInterval(() => {
+            countdown--;
+            document.getElementById('countdown').textContent = countdown;
+            if (countdown <= 0) {
+                location.reload();
+            }
+        }, 1000);
+
+        // Animate progress bars
+        window.addEventListener('load', () => {
+            const progressBars = document.querySelectorAll('.progress-fill');
+            progressBars.forEach(bar => {
+                const width = bar.style.width;
+                bar.style.width = '0';
+                setTimeout(() => {
+                    bar.style.width = width;
+                }, 100);
+            });
+        });
+
+        // Draw quality trend chart
+        const canvas = document.getElementById('qualityChart');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size
+        canvas.width = 800;
+        canvas.height = 400;
+        
+        // Chart data
+        const data = [
+            { week: 'Now', value: 78.5 },
+            { week: 'W1', value: 82 },
+            { week: 'W2', value: 85 },
+            { week: 'W3', value: 87 },
+            { week: 'W4', value: 89 },
+            { week: 'M2', value: 92 },
+            { week: 'M3', value: 95 },
+            { week: 'Q2', value: 98 }
+        ];
+        
+        // Chart settings
+        const padding = 40;
+        const chartWidth = canvas.width - padding * 2;
+        const chartHeight = canvas.height - padding * 2;
+        const barWidth = chartWidth / data.length * 0.6;
+        const maxValue = 100;
+        
+        // Draw axes
+        ctx.beginPath();
+        ctx.moveTo(padding, padding);
+        ctx.lineTo(padding, canvas.height - padding);
+        ctx.lineTo(canvas.width - padding, canvas.height - padding);
+        ctx.strokeStyle = '#dadce0';
+        ctx.stroke();
+        
+        // Draw bars and labels
+        data.forEach((item, index) => {
+            const x = padding + (chartWidth / data.length) * index + (chartWidth / data.length - barWidth) / 2;
+            const barHeight = (item.value / maxValue) * chartHeight;
+            const y = canvas.height - padding - barHeight;
+            
+            // Draw bar
+            ctx.fillStyle = item.value >= 90 ? '#34a853' : item.value >= 80 ? '#0f9d58' : '#fbbc04';
+            ctx.fillRect(x, y, barWidth, barHeight);
+            
+            // Draw value
+            ctx.fillStyle = '#202124';
+            ctx.font = '12px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(item.value + '%', x + barWidth / 2, y - 5);
+            
+            // Draw label
+            ctx.fillText(item.week, x + barWidth / 2, canvas.height - padding + 20);
+        });
+        
+        // Draw target line
+        const targetY = canvas.height - padding - (95 / maxValue) * chartHeight;
+        ctx.beginPath();
+        ctx.moveTo(padding, targetY);
+        ctx.lineTo(canvas.width - padding, targetY);
+        ctx.strokeStyle = '#ea4335';
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.fillStyle = '#ea4335';
+        ctx.font = '12px Arial';
+        ctx.textAlign = 'right';
+        ctx.fillText('Target: 95%', canvas.width - padding - 5, targetY - 5);
+    </script>
+</body>
+</html>

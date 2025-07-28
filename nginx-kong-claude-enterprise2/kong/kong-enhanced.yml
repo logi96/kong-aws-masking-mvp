@@ -1,0 +1,351 @@
+_format_version: "3.0"
+_transform: true
+
+# Claude API Service Configuration
+services:
+  - name: claude-api-service
+    url: https://api.anthropic.com
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    path: /
+    retries: 3
+    connect_timeout: 5000
+    write_timeout: 60000
+    read_timeout: 60000
+    tags:
+      - claude
+      - production
+      - api
+    
+  - name: claude-messages-service
+    url: https://api.anthropic.com/v1/messages
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    path: /v1/messages
+    retries: 3
+    connect_timeout: 5000
+    write_timeout: 60000
+    read_timeout: 60000
+    tags:
+      - claude
+      - messages
+      - production
+
+# Routes Configuration
+routes:
+  # Main Claude proxy route
+  - name: claude-proxy-route
+    service: claude-messages-service
+    paths:
+      - /claude-proxy/v1/messages
+      - /v1/messages
+    methods:
+      - POST
+    strip_path: false
+    preserve_host: false
+    regex_priority: 0
+    tags:
+      - claude
+      - proxy
+      - messages
+  
+  # Claude completions route (legacy support)
+  - name: claude-completions-route
+    service: claude-api-service
+    paths:
+      - /v1/complete
+      - /claude-proxy/v1/complete
+    methods:
+      - POST
+    strip_path: false
+    preserve_host: false
+    regex_priority: 1
+    tags:
+      - claude
+      - completions
+      - legacy
+  
+  # Health check route
+  - name: health-check-route
+    service: claude-api-service
+    paths:
+      - /health
+      - /api/health
+    methods:
+      - GET
+    strip_path: true
+    tags:
+      - health
+      - monitoring
+
+# Plugins Configuration
+plugins:
+  # AWS Masker Plugin - Main security layer
+  - name: aws-masker
+    route: claude-proxy-route
+    config:
+      # Redis configuration for mapping storage
+      use_redis: true
+      redis_host: redis
+      redis_port: 6379
+      redis_password: "${REDIS_PASSWORD}"
+      redis_database: 0
+      redis_timeout: 2000
+      redis_keepalive_timeout: 60000
+      redis_keepalive_pool_size: 30
+      
+      # AWS Resource Masking Configuration
+      mask_ec2_instances: true
+      mask_s3_buckets: true
+      mask_rds_instances: true
+      mask_elasticache_clusters: true
+      mask_eks_clusters: true
+      mask_lambda_functions: true
+      mask_vpc_ids: true
+      mask_subnet_ids: true
+      mask_security_groups: true
+      mask_private_ips: true
+      mask_iam_roles: true
+      mask_iam_users: true
+      mask_kms_keys: true
+      mask_sns_topics: true
+      mask_sqs_queues: true
+      mask_dynamodb_tables: true
+      mask_efs_filesystems: true
+      mask_elb_names: true
+      mask_cloudfront_distributions: true
+      mask_route53_zones: true
+      mask_elasticbeanstalk_apps: true
+      mask_elasticbeanstalk_envs: true
+      mask_codebuild_projects: true
+      mask_codedeploy_apps: true
+      mask_codepipeline_pipelines: true
+      mask_ecr_repositories: true
+      mask_ecs_clusters: true
+      mask_ecs_services: true
+      mask_ecs_tasks: true
+      mask_glue_databases: true
+      mask_glue_tables: true
+      mask_glue_jobs: true
+      mask_kinesis_streams: true
+      mask_kinesis_firehose: true
+      mask_msk_clusters: true
+      mask_opensearch_domains: true
+      mask_redshift_clusters: true
+      mask_sagemaker_endpoints: true
+      mask_sagemaker_notebooks: true
+      mask_secrets_manager: true
+      mask_ssm_parameters: true
+      mask_step_functions: true
+      mask_transit_gateways: true
+      mask_vpn_connections: true
+      mask_direct_connect: true
+      mask_global_accelerator: true
+      mask_cloudwatch_alarms: true
+      mask_cloudwatch_logs: true
+      mask_eventbridge_rules: true
+      mask_backup_vaults: true
+      mask_datasync_tasks: true
+      mask_fsx_filesystems: true
+      
+      # Advanced options
+      preserve_structure: true
+      log_masked_requests: true
+      log_level: info
+      mapping_ttl: 86400  # 24 hours
+      max_body_size: 10485760  # 10MB
+      enable_metrics: true
+      enable_health_check: true
+      
+      # Event publishing for monitoring
+      publish_events: true
+      event_channel: "aws-masking-events"
+      
+      # Performance tuning
+      cache_size: 10000
+      batch_size: 100
+      worker_pool_size: 4
+      
+      # Pattern matching optimization
+      use_ngx_re: true  # Use optimized regex engine
+      pattern_cache_size: 1000
+      compile_patterns_on_init: true
+    tags:
+      - security
+      - masking
+      - aws
+
+  # Correlation ID for request tracking
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+    tags:
+      - observability
+      - tracking
+
+  # Request transformer for Claude API requirements
+  - name: request-transformer
+    route: claude-proxy-route
+    config:
+      add:
+        headers:
+          - "anthropic-version:2023-06-01"
+          - "x-api-key:${ANTHROPIC_API_KEY}"
+      remove:
+        headers:
+          - "X-Real-IP"
+          - "X-Forwarded-For"
+          - "X-Forwarded-Host"
+      rename:
+        headers:
+          - "Authorization:x-api-key"
+    tags:
+      - security
+      - headers
+
+  # Response transformer for metadata
+  - name: response-transformer
+    route: claude-proxy-route
+    config:
+      add:
+        headers:
+          - "X-Kong-Proxy:true"
+          - "X-Masked-Response:true"
+          - "X-Kong-Request-ID:$(request_id)"
+      remove:
+        headers:
+          - "Server"
+    tags:
+      - metadata
+      - security
+
+  # Rate limiting for API protection
+  - name: rate-limiting
+    route: claude-proxy-route
+    config:
+      minute: 60
+      hour: 1000
+      policy: redis
+      redis_host: redis
+      redis_port: 6379
+      redis_password: "${REDIS_PASSWORD}"
+      redis_database: 1
+      fault_tolerant: true
+      hide_client_headers: false
+    tags:
+      - traffic-control
+      - protection
+
+  # Request size limiting
+  - name: request-size-limiting
+    route: claude-proxy-route
+    config:
+      allowed_payload_size: 10  # 10MB
+      size_unit: megabytes
+      require_content_length: false
+    tags:
+      - security
+      - validation
+
+  # Bot detection
+  - name: bot-detection
+    route: claude-proxy-route
+    config:
+      deny: 
+        - "(C|c)rawler"
+        - "(S|s)pider"
+        - "(B|b)ot"
+      allow: []
+    enabled: true
+    tags:
+      - security
+      - protection
+
+  # IP restriction (optional, configure as needed)
+  - name: ip-restriction
+    route: claude-proxy-route
+    config:
+      allow:
+        - 172.28.0.0/16  # Docker network
+        - 127.0.0.1
+      deny: []
+      status: 403
+      message: "Access denied"
+    enabled: false
+    tags:
+      - security
+      - access-control
+
+# Upstream configuration for load balancing
+upstreams:
+  - name: claude-api-upstream
+    algorithm: round-robin
+    slots: 10000
+    healthchecks:
+      active:
+        healthy:
+          interval: 30
+          successes: 2
+          http_statuses:
+            - 200
+            - 201
+            - 202
+            - 203
+            - 204
+        unhealthy:
+          interval: 5
+          http_failures: 5
+          tcp_failures: 5
+          timeouts: 5
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+      passive:
+        healthy:
+          successes: 2
+          http_statuses:
+            - 200
+            - 201
+            - 202
+            - 203
+            - 204
+        unhealthy:
+          http_failures: 5
+          tcp_failures: 5
+          timeouts: 5
+          http_statuses:
+            - 429
+            - 500
+            - 501
+            - 502
+            - 503
+            - 504
+            - 505
+    tags:
+      - claude
+      - production
+      - upstream
+
+# Consumer configuration for API key management (optional)
+consumers:
+  - username: claude-client
+    custom_id: claude-client-001
+    tags:
+      - production
+      - client
+
+# ACL configuration (optional)
+acls:
+  - consumer: claude-client
+    group: claude-api-users
+    tags:
+      - access-control

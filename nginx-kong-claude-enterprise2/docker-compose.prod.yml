@@ -1,0 +1,338 @@
+version: '3.8'
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+    labels: "service,environment,version"
+    env: "SERVICE_NAME,SERVICE_VERSION"
+
+x-healthcheck-defaults: &healthcheck-defaults
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+services:
+  # Redis - Data persistence layer with production settings
+  redis:
+    build:
+      context: ./redis
+      dockerfile: Dockerfile
+    container_name: claude-redis
+    image: claude-redis:${SERVICE_VERSION:-latest}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data:delegated
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-logs:/var/log/redis
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      - TZ=${TZ:-Asia/Seoul}
+      - SERVICE_NAME=redis
+      - SERVICE_VERSION=${SERVICE_VERSION:-latest}
+    networks:
+      claude-network:
+        aliases:
+          - redis-master
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: ${REDIS_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "redis-cli --raw incr ping && redis-cli --raw del ping:1"]
+    restart: unless-stopped
+    logging: *default-logging
+    labels:
+      com.claude.service: "redis"
+      com.claude.version: "${SERVICE_VERSION:-latest}"
+      com.claude.environment: "${ENVIRONMENT:-production}"
+
+  # Kong - API Gateway with AWS masking and production optimizations
+  kong:
+    build:
+      context: ./kong
+      dockerfile: Dockerfile
+      args:
+        KONG_VERSION: ${KONG_VERSION:-3.9.0.1}
+    container_name: claude-kong
+    image: claude-kong:${SERVICE_VERSION:-latest}
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - KONG_DATABASE=off
+      - KONG_DECLARATIVE_CONFIG=/usr/local/kong/declarative/kong.yml
+      - KONG_PROXY_ACCESS_LOG=/dev/stdout
+      - KONG_ADMIN_ACCESS_LOG=/dev/stdout
+      - KONG_PROXY_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_ERROR_LOG=/dev/stderr
+      - KONG_LOG_LEVEL=${KONG_LOG_LEVEL:-info}
+      - KONG_MEM_CACHE_SIZE=${KONG_MEM_CACHE_SIZE:-1024m}
+      - KONG_PLUGINS=bundled,aws-masker
+      - KONG_LUA_PACKAGE_PATH=/usr/local/kong/plugins/?.lua;/usr/local/kong/plugins/?/init.lua;;
+      - KONG_NGINX_WORKER_PROCESSES=${KONG_WORKER_PROCESSES:-auto}
+      - KONG_NGINX_PROXY_PROXY_BUFFER_SIZE=160k
+      - KONG_NGINX_PROXY_PROXY_BUFFERS=64 160k
+      - KONG_CLIENT_BODY_BUFFER_SIZE=8m
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_STATUS_LISTEN=0.0.0.0:8100
+      - KONG_CLUSTER_LISTEN=off
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_TIMEOUT=5000
+      - REDIS_CONNECT_TIMEOUT=5000
+      - REDIS_KEEPALIVE_TIMEOUT=60000
+      - REDIS_POOL_SIZE=100
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TZ=${TZ:-Asia/Seoul}
+      - SERVICE_NAME=kong
+      - SERVICE_VERSION=${SERVICE_VERSION:-latest}
+    volumes:
+      - ./kong/kong.yml:/usr/local/kong/declarative/kong.yml:ro
+      - ./kong/plugins:/usr/local/kong/plugins:ro,cached
+      - kong-logs:/usr/local/kong/logs
+      - kong-prefix:/usr/local/kong
+    ports:
+      - "${KONG_ADMIN_PORT:-8001}:8001"
+      - "${KONG_PROXY_PORT:-8000}:8000"
+      - "${KONG_STATUS_PORT:-8100}:8100"
+    networks:
+      claude-network:
+        aliases:
+          - kong-gateway
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: ${KONG_MEMORY_LIMIT:-2G}
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "kong health && curl -f http://localhost:8100/status || exit 1"]
+    restart: unless-stopped
+    logging: *default-logging
+    labels:
+      com.claude.service: "kong"
+      com.claude.version: "${SERVICE_VERSION:-latest}"
+      com.claude.environment: "${ENVIRONMENT:-production}"
+    stop_grace_period: 30s
+
+  # Nginx - Enterprise proxy layer with production optimizations
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+      args:
+        NGINX_VERSION: ${NGINX_VERSION:-1.27.0}
+    container_name: claude-nginx
+    image: claude-nginx:${SERVICE_VERSION:-latest}
+    depends_on:
+      kong:
+        condition: service_healthy
+    ports:
+      - "${NGINX_PROXY_PORT:-8082}:8082"
+      - "${NGINX_METRICS_PORT:-9113}:9113"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - nginx-logs:/var/log/nginx
+      - nginx-cache:/var/cache/nginx
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    environment:
+      - NGINX_WORKER_PROCESSES=${NGINX_WORKER_PROCESSES:-auto}
+      - NGINX_WORKER_CONNECTIONS=${NGINX_WORKER_CONNECTIONS:-2048}
+      - NGINX_WORKER_RLIMIT_NOFILE=65535
+      - TZ=${TZ:-Asia/Seoul}
+      - SERVICE_NAME=nginx
+      - SERVICE_VERSION=${SERVICE_VERSION:-latest}
+    networks:
+      claude-network:
+        aliases:
+          - nginx-proxy
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: ${NGINX_MEMORY_LIMIT:-1G}
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      <<: *healthcheck-defaults
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8082/health || exit 1"]
+    restart: unless-stopped
+    logging: *default-logging
+    labels:
+      com.claude.service: "nginx"
+      com.claude.version: "${SERVICE_VERSION:-latest}"
+      com.claude.environment: "${ENVIRONMENT:-production}"
+    stop_grace_period: 15s
+
+  # Claude Client - Test environment (optional in production)
+  claude-client:
+    build:
+      context: ./claude-client
+      dockerfile: Dockerfile
+    container_name: claude-client
+    image: claude-client:${SERVICE_VERSION:-latest}
+    depends_on:
+      nginx:
+        condition: service_healthy
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - ANTHROPIC_BASE_URL=http://nginx:8082
+      - NODE_ENV=${NODE_ENV:-production}
+      - TZ=${TZ:-Asia/Seoul}
+      - SERVICE_NAME=claude-client
+      - SERVICE_VERSION=${SERVICE_VERSION:-latest}
+    volumes:
+      - ./claude-client/test-scenarios:/app/test-scenarios:ro,cached
+      - client-logs:/app/logs
+    networks:
+      - claude-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    command: ["tail", "-f", "/dev/null"]
+    restart: "no"
+    logging: *default-logging
+    labels:
+      com.claude.service: "claude-client"
+      com.claude.version: "${SERVICE_VERSION:-latest}"
+      com.claude.environment: "${ENVIRONMENT:-production}"
+    profiles:
+      - testing
+
+  # Redis Backup Service (Production only)
+  redis-backup:
+    image: redis:7.4-alpine
+    container_name: claude-redis-backup
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - BACKUP_SCHEDULE=${BACKUP_SCHEDULE:-0 */6 * * *}
+      - BACKUP_RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+      - TZ=${TZ:-Asia/Seoul}
+    volumes:
+      - redis-backups:/backups
+      - ./scripts/redis-backup.sh:/usr/local/bin/backup.sh:ro
+    networks:
+      - claude-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 256M
+    command: >
+      sh -c 'echo "${BACKUP_SCHEDULE} /usr/local/bin/backup.sh" | crontab - && crond -f'
+    restart: unless-stopped
+    logging: *default-logging
+    profiles:
+      - production
+
+  # Monitoring Exporter (Production only)
+  monitoring-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: claude-monitoring
+    ports:
+      - "${MONITORING_PORT:-9100}:9100"
+    networks:
+      - claude-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+    logging: *default-logging
+    profiles:
+      - monitoring
+
+networks:
+  claude-network:
+    name: ${NETWORK_NAME:-claude-enterprise}
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: claude-br
+    ipam:
+      driver: default
+      config:
+        - subnet: ${NETWORK_SUBNET:-172.28.0.0/16}
+          gateway: ${NETWORK_GATEWAY:-172.28.0.1}
+    labels:
+      com.claude.network: "production"
+      com.claude.environment: "${ENVIRONMENT:-production}"
+
+volumes:
+  redis-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${REDIS_DATA_PATH:-./redis/data}
+    labels:
+      com.claude.volume.type: "persistent"
+      com.claude.volume.backup: "required"
+  
+  redis-logs:
+    driver: local
+    labels:
+      com.claude.volume.type: "logs"
+      com.claude.volume.retention: "${LOG_RETENTION_DAYS:-7}"
+  
+  redis-backups:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${REDIS_BACKUP_PATH:-./backups/redis}
+    labels:
+      com.claude.volume.type: "backup"
+  
+  kong-logs:
+    driver: local
+    labels:
+      com.claude.volume.type: "logs"
+      com.claude.volume.retention: "${LOG_RETENTION_DAYS:-7}"
+  
+  kong-prefix:
+    driver: local
+    labels:
+      com.claude.volume.type: "runtime"
+  
+  nginx-logs:
+    driver: local
+    labels:
+      com.claude.volume.type: "logs"
+      com.claude.volume.retention: "${LOG_RETENTION_DAYS:-7}"
+  
+  nginx-cache:
+    driver: local
+    labels:
+      com.claude.volume.type: "cache"
+  
+  client-logs:
+    driver: local
+    labels:
+      com.claude.volume.type: "logs"
+      com.claude.volume.retention: "${LOG_RETENTION_DAYS:-3}"
