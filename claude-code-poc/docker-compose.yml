@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  # Kong Gateway (simplified for POC)
+  kong:
+    image: kong:3.9-ubuntu
+    environment:
+      - KONG_DATABASE=off
+      - KONG_PROXY_ACCESS_LOG=/dev/stdout
+      - KONG_ADMIN_ACCESS_LOG=/dev/stdout
+      - KONG_PROXY_ERROR_LOG=/dev/stderr
+      - KONG_ADMIN_ERROR_LOG=/dev/stderr
+      - KONG_DECLARATIVE_CONFIG=/kong.yml
+    ports:
+      - "8000:8000"  # Proxy port
+      - "8001:8001"  # Admin port
+    volumes:
+      - ./kong.yml:/kong.yml:ro
+    networks:
+      - poc-net
+
+  # Masking Proxy (HTTP - solving the HTTPS issue!)
+  masking-proxy:
+    build:
+      context: ./kong-masking-proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8082:8082"  # HTTP port for Claude Code
+    environment:
+      - KONG_URL=http://kong:8000
+      - KONG_ROUTE=/claude-proxy/v1/messages
+    depends_on:
+      - kong
+    networks:
+      - poc-net
+    volumes:
+      - ./kong-masking-proxy:/app
+
+  # Claude Code Test Container (Isolated environment)
+  claude-test:
+    build:
+      context: ./claude-code-test
+      dockerfile: Dockerfile
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-test-api-key}
+      - PROXY_HOST=masking-proxy
+      - PROXY_PORT=8082
+    depends_on:
+      - masking-proxy
+    networks:
+      - poc-net
+    volumes:
+      - ./claude-code-test/results:/workspace/results
+    stdin_open: true
+    tty: true
+    command: ["/bin/bash", "-c", "echo 'Claude Code test container ready. Run: ./test-claude-code.sh' && /bin/bash"]
+
+networks:
+  poc-net:
+    driver: bridge

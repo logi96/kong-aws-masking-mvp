@@ -1,0 +1,49 @@
+{
+  "testSuite": "Anthropic SDK Proxy Tests",
+  "executionTime": "2025-07-27T23:44:26.219Z",
+  "environment": {
+    "nodeVersion": "v22.14.0",
+    "platform": "darwin",
+    "proxyUrl": "http://localhost:8000"
+  },
+  "results": [
+    {
+      "testName": "Direct Connection Test",
+      "success": false,
+      "method": "direct",
+      "responseTime": 724,
+      "error": "Direct connection succeeded when it should have been blocked",
+      "response": "Direct connection successful.",
+      "timestamp": "2025-07-27T23:44:23.776Z"
+    },
+    {
+      "testName": "ProxyAgent Connection Test",
+      "success": false,
+      "method": "ProxyAgent",
+      "responseTime": 1348,
+      "error": "Connection error.",
+      "timestamp": "2025-07-27T23:44:25.124Z"
+    },
+    {
+      "testName": "Environment Variable Test",
+      "success": true,
+      "method": "ANTHROPIC_BASE_URL",
+      "responseTime": 483,
+      "response": "Environment variable connection successful",
+      "timestamp": "2025-07-27T23:44:25.608Z"
+    },
+    {
+      "testName": "Custom Fetch Test",
+      "success": true,
+      "method": "customFetch",
+      "responseTime": 611,
+      "response": "Custom fetch connection successful",
+      "timestamp": "2025-07-27T23:44:26.219Z"
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "passed": 2,
+    "failed": 2
+  }
+}

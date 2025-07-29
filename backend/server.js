@@ -30,9 +30,21 @@ function validateEnvironment() {
  * @param {import('http').Server} server - HTTP 서버 인스턴스
  */
 function setupGracefulShutdown(server) {
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     console.log(`Received ${signal}. Starting graceful shutdown...`);
     
+    // Redis Event Subscriber 정리
+    if (app.locals.redisSubscriber) {
+      try {
+        console.log('Stopping Redis Event Subscriber...');
+        await app.locals.redisSubscriber.stop();
+        console.log('Redis Event Subscriber stopped successfully');
+      } catch (error) {
+        console.error('Error stopping Redis Event Subscriber:', error);
+      }
+    }
+    
+    // HTTP 서버 종료
     server.close((err) => {
       if (err) {
         console.error('Error during server shutdown:', err);
@@ -43,11 +55,11 @@ function setupGracefulShutdown(server) {
       process.exit(0);
     });
     
-    // 강제 종료 타이머 (10초)
+    // 강제 종료 타이머 (15초로 연장 - Redis 정리 시간 고려)
     setTimeout(() => {
       console.error('Forceful shutdown after timeout');
       process.exit(1);
-    }, 10000);
+    }, 15000);
   };
   
   process.on('SIGTERM', () => shutdown('SIGTERM'));

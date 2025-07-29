@@ -1,0 +1,8 @@
+{
+    "messages": [{
+        "role": "user",
+        "content": "Check EC2 instance i-1234567890abcdef0 in region us-east-1. Also check S3 bucket my-production-bucket and RDS instance prod-db-master with security group sg-12345678 and subnet subnet-0123456789abcdef0. The private IP is 10.0.1.100 and public IP is 54.239.28.85"
+    }],
+    "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 100
+}

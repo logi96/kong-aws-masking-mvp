@@ -1,0 +1,339 @@
+_format_version: "3.0"
+_transform: true
+
+# Consumers for API Key Authentication
+consumers:
+  - username: demo-user
+    custom_id: demo-001
+    tags:
+      - demo
+      - standard
+    keyauth_credentials:
+      - key: demo-api-key-12345
+        tags:
+          - demo
+
+  - username: premium-user
+    custom_id: premium-001
+    tags:
+      - premium
+      - production
+    keyauth_credentials:
+      - key: premium-api-key-67890
+        tags:
+          - premium
+
+services:
+  - name: claude-api-service
+    url: https://api.anthropic.com/v1/messages
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    path: /v1/messages
+    retries: 3
+    connect_timeout: 5000
+    write_timeout: 60000
+    read_timeout: 60000
+    tags:
+      - claude
+      - production
+
+  - name: auth-management-service
+    url: http://backend:3000/api/v1/auth
+    protocol: http
+    host: backend
+    port: 3000
+    path: /api/v1/auth
+    retries: 2
+    connect_timeout: 3000
+    write_timeout: 30000
+    read_timeout: 30000
+    tags:
+      - auth
+      - management
+
+routes:
+  - name: claude-proxy-route
+    service: claude-api-service
+    paths:
+      - /claude-proxy/v1/messages
+      - /v1/messages
+    methods:
+      - POST
+    strip_path: false
+    preserve_host: false
+    regex_priority: 0
+    tags:
+      - claude
+      - proxy
+
+  - name: auth-management-route
+    service: auth-management-service
+    paths:
+      - /api/v1/auth
+    methods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+    strip_path: false
+    preserve_host: false
+    regex_priority: 0
+    tags:
+      - auth
+      - management
+
+plugins:
+  # API Key Authentication
+  - name: key-auth
+    route: claude-proxy-route
+    config:
+      key_names:
+        - X-API-Key
+        - apikey
+      key_in_body: false
+      key_in_header: true
+      key_in_query: true
+      hide_credentials: true
+      anonymous: null
+      run_on_preflight: true
+    tags:
+      - authentication
+      - security
+
+  # JWT Authentication (alternative to API Key)
+  - name: jwt
+    route: claude-proxy-route
+    enabled: false  # Can be enabled when JWT is preferred
+    config:
+      uri_param_names:
+        - jwt
+      cookie_names:
+        - jwt-token
+      header_names:
+        - authorization
+      claims_to_verify:
+        - exp
+        - nbf
+      key_claim_name: iss
+      secret_is_base64: false
+      anonymous: null
+      run_on_preflight: true
+      maximum_expiration: 3600  # 1 hour
+    tags:
+      - authentication
+      - jwt
+
+  # Rate Limiting per API Key
+  - name: rate-limiting
+    route: claude-proxy-route
+    config:
+      minute: 100  # Default rate limit
+      hour: 5000
+      day: 100000
+      month: null
+      year: null
+      policy: redis
+      fault_tolerant: true
+      redis_host: redis
+      redis_port: 6379
+      redis_password: "${REDIS_PASSWORD}"
+      redis_timeout: 2000
+      redis_database: 1
+      hide_client_headers: false
+      limit_by: credential  # Rate limit by API key/JWT
+      header_name: null
+      path: null
+      sync_rate: -1
+    tags:
+      - rate-limiting
+      - security
+
+  # Advanced Rate Limiting for Premium Users
+  - name: rate-limiting
+    consumer: premium-user
+    route: claude-proxy-route
+    config:
+      minute: 1000  # Premium rate limit
+      hour: 50000
+      day: 1000000
+      policy: redis
+      fault_tolerant: true
+      redis_host: redis
+      redis_port: 6379
+      redis_password: "${REDIS_PASSWORD}"
+      redis_timeout: 2000
+      redis_database: 1
+      hide_client_headers: false
+      limit_by: credential
+    tags:
+      - rate-limiting
+      - premium
+
+  # Request Size Limiting
+  - name: request-size-limiting
+    route: claude-proxy-route
+    config:
+      allowed_payload_size: 10  # 10MB
+      size_unit: megabytes
+      require_content_length: false
+    tags:
+      - security
+      - validation
+
+  # IP Restriction (optional)
+  - name: ip-restriction
+    route: claude-proxy-route
+    enabled: false
+    config:
+      allow:
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+      deny: null
+      status: 403
+      message: "Access denied"
+    tags:
+      - security
+      - ip-restriction
+
+  # AWS Masker Plugin
+  - name: aws-masker
+    route: claude-proxy-route
+    config:
+      # Redis configuration
+      use_redis: true
+      redis_host: redis
+      redis_port: 6379
+      redis_password: "${REDIS_PASSWORD}"
+      redis_database: 0
+      redis_timeout: 2000
+      redis_keepalive_timeout: 60000
+      redis_keepalive_pool_size: 30
+      
+      # Masking features
+      mask_ec2_instances: true
+      mask_s3_buckets: true
+      mask_rds_instances: true
+      mask_elasticache_clusters: true
+      mask_eks_clusters: true
+      mask_lambda_functions: true
+      mask_vpc_ids: true
+      mask_subnet_ids: true
+      mask_security_groups: true
+      mask_private_ips: true
+      mask_iam_roles: true
+      mask_iam_users: true
+      mask_kms_keys: true
+      mask_sns_topics: true
+      mask_sqs_queues: true
+      mask_dynamodb_tables: true
+      mask_efs_filesystems: true
+      mask_elb_names: true
+      mask_cloudfront_distributions: true
+      mask_route53_zones: true
+      
+      # Advanced options
+      preserve_structure: true
+      log_masked_requests: true
+      log_level: info
+      mapping_ttl: 86400  # 24 hours
+      max_body_size: 10485760  # 10MB
+      enable_metrics: true
+      enable_health_check: true
+      
+      # Event publishing
+      publish_events: true
+      event_channel: "aws-masking-events"
+      
+      # Performance tuning
+      cache_size: 10000
+      batch_size: 100
+      worker_pool_size: 4
+    tags:
+      - security
+      - masking
+
+  # Correlation ID
+  - name: correlation-id
+    config:
+      header_name: X-Correlation-ID
+      generator: uuid
+      echo_downstream: true
+    tags:
+      - observability
+
+  # Request Transformer
+  - name: request-transformer
+    route: claude-proxy-route
+    config:
+      add:
+        headers:
+          - "anthropic-version:2023-06-01"
+      remove:
+        headers:
+          - "X-Real-IP"
+          - "X-Forwarded-For"
+    tags:
+      - security
+
+  # Response Transformer
+  - name: response-transformer
+    route: claude-proxy-route
+    config:
+      add:
+        headers:
+          - "X-Kong-Proxy:true"
+          - "X-Masked-Response:true"
+          - "X-RateLimit-Limit:$(header.X-RateLimit-Limit-Minute)"
+          - "X-RateLimit-Remaining:$(header.X-RateLimit-Remaining-Minute)"
+    tags:
+      - metadata
+
+  # Basic Auth for Management API
+  - name: basic-auth
+    route: auth-management-route
+    config:
+      hide_credentials: true
+      anonymous: null
+    tags:
+      - authentication
+      - management
+
+  # ACL for Management API
+  - name: acl
+    route: auth-management-route
+    config:
+      allow:
+        - admin
+        - key-manager
+      deny: null
+      hide_groups_header: true
+    tags:
+      - authorization
+      - management
+
+upstreams:
+  - name: claude-api-upstream
+    algorithm: round-robin
+    slots: 10000
+    healthchecks:
+      active:
+        healthy:
+          interval: 30
+          successes: 2
+        unhealthy:
+          interval: 5
+          http_failures: 5
+          tcp_failures: 5
+          timeouts: 5
+      passive:
+        healthy:
+          successes: 2
+        unhealthy:
+          http_failures: 5
+          tcp_failures: 5
+          timeouts: 5
+    tags:
+      - claude
+      - production

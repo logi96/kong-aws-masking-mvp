@@ -142,8 +142,8 @@ const validateAnalyzeRequest = [
   
   body('options.maxTokens')
     .optional()
-    .isInt({ min: 1, max: 4000 })
-    .withMessage('maxTokens must be between 1 and 4000')
+    .isInt({ min: 10, max: 5000 })
+    .withMessage('maxTokens must be between 10 and 5000')
 ];
 
 /**

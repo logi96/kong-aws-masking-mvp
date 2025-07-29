@@ -1,0 +1,13 @@
+return {
+  default = {
+    verbose = true,
+    coverage = true,
+    output = "gtest",
+    ROOT = {"spec/"},
+    pattern = "spec%.lua$",
+    lpath = "./?.lua;./?/init.lua",
+    cpath = "",
+    loaders = {"lua"},
+    excludes = {},
+  }
+}

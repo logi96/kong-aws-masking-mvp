@@ -1,0 +1,11 @@
+{
+  "model": "claude-3-5-sonnet-20241022",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "I need help setting up replication between two S3 buckets: my-production-data-bucket and my-backup-data-bucket. The source bucket has sensitive data and I want to ensure proper encryption. Also, I have another bucket analytics-results-bucket that stores processed data. What's the best practice for this setup?"
+    }
+  ],
+  "system": "You are an AWS S3 expert. Provide detailed guidance on S3 bucket configuration and best practices."
+}

@@ -1,0 +1,87 @@
+version: '3.8'
+
+# Development override configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  kong:
+    build:
+      context: .
+      dockerfile: docker/kong/Dockerfile
+      cache_from:
+        - kong:${KONG_VERSION:-3.9.0.1}-alpine
+    environment:
+      KONG_LOG_LEVEL: debug
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+    volumes:
+      # Live reload for Kong configuration
+      - ./kong/kong.yml:/opt/kong/kong.yml:ro
+      # Live reload for plugins
+      - ./kong/plugins:/usr/local/share/lua/5.1/kong/plugins:ro
+      # Development logs
+      - ./logs/kong:/var/log/kong
+    labels:
+      com.docker.compose.service.mode: "development"
+
+  backend:
+    build:
+      target: development
+      cache_from:
+        - node:20-alpine
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+      NODEMON_WATCH: "true"
+      NODEMON_EXT: "js,json,yml,yaml"
+      NODEMON_DELAY: "1000"
+      ENABLE_DEBUG_LOGGING: "true"
+    volumes:
+      # Source code with hot reload
+      - ./backend:/app:delegated
+      # Exclude node_modules for performance
+      - /app/node_modules
+      # AWS credentials for development
+      - ${HOME}/.aws:/home/node/.aws:ro
+      # Development logs
+      - ./logs/backend:/app/logs
+    command: ["nodemon", "--watch", ".", "--ext", "js,json", "--ignore", "node_modules/", "server.js"]
+    labels:
+      com.docker.compose.service.mode: "development"
+
+  # Optional: Development tools container
+  dev-tools:
+    image: node:20-alpine
+    container_name: dev-tools
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - ${HOME}/.aws:/root/.aws:ro
+    networks:
+      - frontend
+      - backend
+    command: ["tail", "-f", "/dev/null"]
+    profiles:
+      - tools
+
+  # Optional: API documentation server
+  # swagger-ui:
+  #   image: swaggerapi/swagger-ui:latest
+  #   container_name: swagger-ui
+  #   environment:
+  #     SWAGGER_JSON: /api-docs/openapi.yaml
+  #   volumes:
+  #     - ./docs/api:/api-docs:ro
+  #   ports:
+  #     - "8080:8080"
+  #   networks:
+  #     - frontend
+  #   profiles:
+  #     - docs
+
+# Development-specific volumes
+volumes:
+  kong-logs:
+    driver: local
+  backend-logs:
+    driver: local

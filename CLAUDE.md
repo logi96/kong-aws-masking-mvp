@@ -5,18 +5,76 @@
 **Current Phase**: MVP Implementation
 **Purpose**: Mask sensitive AWS resource identifiers before Claude API analysis
 
+## 🏛️ Kong API Gateway Documentation (MUST READ FIRST)
+
+### 📚 **Complete Technical Documentation Suite**
+**Location**: `/kong/plugins/aws-masker/docs/README.md`
+
+This project has a comprehensive 8-document technical series that MUST be referenced:
+
+1. **[Main Technical Report](./kong/plugins/aws-masker/docs/detailed-technical-implementation-report.md)** - Project overview and achievements
+2. **[Source Code Changes](./kong/plugins/aws-masker/docs/source-code-changes-detailed.md)** - Handler.lua innovations
+3. **[Configuration Changes](./kong/plugins/aws-masker/docs/configuration-changes-detailed.md)** - Environment and Docker setup
+4. **[Test Scripts Verification](./kong/plugins/aws-masker/docs/test-scripts-verification-detailed.md)** - 50 patterns validation
+5. **[System Process Diagrams](./kong/plugins/aws-masker/docs/system-process-diagrams.md)** - 6 Mermaid architecture diagrams
+6. **[Technical Issues Solutions](./kong/plugins/aws-masker/docs/technical-issues-solutions-detailed.md)** - 7 major issues resolved
+7. **[Performance Security Validation](./kong/plugins/aws-masker/docs/performance-security-validation-detailed.md)** - 100% security achievement
+8. **[Plugin Dependency Stabilization](./kong/plugins/aws-masker/docs/plugin-dependency-stabilization.md)** - 11 plugin files analysis
+
+### 👥 **Required Reading by Role**
+- **Developers**: Start with docs 2, 6, 8
+- **Operations**: Focus on docs 3, 7, 8
+- **Security Team**: Priority on docs 6, 7
+- **Architects**: Review docs 1, 5, 8
+
+## 🧪 Testing Requirements (CRITICAL COMPLIANCE)
+
+### 🚨 **MUST Rules for Testing**
+**Reference**: `/tests/README.md`
+
+#### **Rule #1: Test Report Generation (MANDATORY)**
+- **Every `.sh` test execution MUST generate a report**
+- **Location**: `/tests/test-report/`
+- **Naming**: `{shell-name}_{sequence}.md` (e.g., `redis-connection-test-001.md`)
+- **Sequence**: Auto-increment for repeated runs (001, 002, 003...)
+
+#### **Rule #2: Test Script Duplication Prevention**
+- **Before creating ANY new test script**: Review ALL existing scripts in `/tests/README.md`
+- **If similar test exists**: MUST get user approval before creating new one
+- **Prohibited**: Creating duplicate functionality without explicit user permission
+
+### 📋 **Active Test Scripts**
+10 production-validated test scripts available:
+- `comprehensive-flow-test.sh` - Full masking/unmasking flow
+- `comprehensive-security-test.sh` - Security and fail-secure validation
+- `production-comprehensive-test.sh` - Production environment validation
+- `performance-test.sh` - Performance benchmarks
+- `redis-connection-test.sh` - Redis connectivity verification
+- [See complete list with usage scenarios in `/tests/README.md`]
+
+### 🎯 **Test Execution Requirements**
+```bash
+# Before ANY code changes
+./comprehensive-flow-test.sh
+./comprehensive-security-test.sh
+
+# After changes - verify results in test-report/
+ls -la tests/test-report/
+```
+
 ## 🚨 Critical Rules (MUST FOLLOW)
 
 1. **ZERO MOCK MODE**: Mock mode is STRICTLY PROHIBITED - use real APIs only
 2. **Type Safety**: Always use JSDoc annotations for type checking
-3. **Testing First**: Write tests before implementation
-4. **Lint & Typecheck**: Run `npm run lint` and `npm run type-check` after code changes
-5. **Documentation Location**: 
-   - Project docs: `/Docs/`
-   - Standards: `/Docs/Standards/`
-6. **No Direct AWS Exposure**: All AWS resources must be masked before external API calls
-7. **Response Time**: Target < 5 seconds for all operations
-8. **Real API Keys Only**: No test keys, fake keys, or mock keys allowed
+3. **Testing First**: Write tests before implementation (see Testing Requirements above)
+4. **Test Reports**: MUST generate reports for ALL test executions in `/tests/test-report/`
+5. **Lint & Typecheck**: Run `npm run lint` and `npm run type-check` after code changes
+6. **Documentation First**: Always check Kong docs before implementation
+   - Kong plugin docs: `/kong/plugins/aws-masker/docs/`
+   - Project standards: `/Docs/Standards/`
+7. **No Direct AWS Exposure**: All AWS resources must be masked before external API calls
+8. **Response Time**: Target < 5 seconds for all operations
+9. **Real API Keys Only**: No test keys, fake keys, or mock keys allowed
 
 ## Architecture
 ```
@@ -118,6 +176,22 @@ curl -X POST http://localhost:3000/analyze \
   -d '{"resources":["ec2"],"options":{"analysisType":"security_only"}}'
 ```
 
+### Test Execution (MANDATORY)
+```bash
+# Quick validation before code changes
+cd tests/
+./comprehensive-flow-test.sh
+./comprehensive-security-test.sh
+
+# Full production validation
+./production-comprehensive-test.sh
+./production-security-test.sh
+
+# Check test reports (MUST be generated)
+ls -la test-report/
+cat test-report/comprehensive-flow-test-001.md
+```
+
 ### Health Checks
 ```bash
 # Backend API health
@@ -185,11 +259,17 @@ npm run lint
 3. Backend auto-reloads if using nodemon
 4. Otherwise: `docker-compose restart backend`
 
-### Testing Changes
-1. Always run health checks first
-2. Test with sample AWS data
-3. Verify masking/unmasking works correctly
-4. Check Claude API integration
+### Testing Changes (MUST FOLLOW)
+1. **Before ANY changes**: Run comprehensive tests
+   ```bash
+   cd tests/
+   ./comprehensive-flow-test.sh
+   ./comprehensive-security-test.sh
+   ```
+2. **After changes**: Run relevant test suite
+3. **Verify test reports**: Check `/tests/test-report/` for generated reports
+4. **Production validation**: Run production tests before deployment
+5. **No duplicate tests**: Check existing tests in `/tests/README.md` first
 
 ## Important Notes
 - AWS credentials are mounted read-only for security
@@ -198,6 +278,17 @@ npm run lint
 - Currently in MVP phase - only essential features implemented
 
 ## 📁 Quick References
+
+### Kong API Gateway Specific (PRIORITY)
+- **📚 Kong Plugin Documentation Hub**: [kong/plugins/aws-masker/docs/README.md](./kong/plugins/aws-masker/docs/README.md) - Complete 8-document technical series navigation
+- **🔧 Kong Plugin Development**: [Docs/Standards/17-kong-plugin-development-guide.md](./Docs/Standards/17-kong-plugin-development-guide.md) - Lua plugin architecture, handler lifecycle, pattern matching, testing strategies
+- **🔒 AWS Resource Masking**: [Docs/Standards/18-aws-resource-masking-patterns.md](./Docs/Standards/18-aws-resource-masking-patterns.md) - AWS resource taxonomy, masking patterns, regex validation, security principles
+- **🐳 Docker Compose Best Practices**: [Docs/Standards/19-docker-compose-best-practices.md](./Docs/Standards/19-docker-compose-best-practices.md) - Service configuration, environment management, networking setup
+
+### Testing & Validation (CRITICAL)
+- **🧪 Test Suite Documentation**: [tests/README.md](./tests/README.md) - MUST rules, active test scripts, usage scenarios, troubleshooting
+- **📊 Test Scripts Verification**: [kong/plugins/aws-masker/docs/test-scripts-verification-detailed.md](./kong/plugins/aws-masker/docs/test-scripts-verification-detailed.md) - 50 patterns validation details
+- **⚡ Performance Validation**: [kong/plugins/aws-masker/docs/performance-security-validation-detailed.md](./kong/plugins/aws-masker/docs/performance-security-validation-detailed.md) - Benchmarks and security tests
 
 ### Development & Code Quality
 - **Code Standards**: [Docs/Standards/02-code-standards-base-rules.md](./Docs/Standards/02-code-standards-base-rules.md) - JavaScript coding conventions, Lua style guide, error handling patterns, logging standards, naming conventions, function design principles, comment guidelines, import organization
@@ -219,10 +310,6 @@ npm run lint
 - **TypeScript Roadmap**: [Docs/Standards/11-typescript-migration-roadmap.md](./Docs/Standards/11-typescript-migration-roadmap.md) - migration phases, priority components, type definition strategy, tooling updates, team training plan
 - **Comprehensive Checklist**: [Docs/Standards/00-comprehensive-summary-checklist.md](./Docs/Standards/00-comprehensive-summary-checklist.md) - project readiness, security audit, performance validation, documentation completeness, deployment verification
 
-### Kong AWS Masking Specific
-- **Kong Plugin Development**: [Docs/Standards/17-kong-plugin-development-guide.md](./Docs/Standards/17-kong-plugin-development-guide.md) - Lua plugin architecture, handler lifecycle, pattern matching, testing strategies, debugging techniques, performance optimization, deployment guidelines
-- **AWS Resource Masking**: [Docs/Standards/18-aws-resource-masking-patterns.md](./Docs/Standards/18-aws-resource-masking-patterns.md) - AWS resource taxonomy, masking patterns, regex validation, security principles, implementation examples, edge cases, troubleshooting guide
-- **Docker Compose Best Practices**: [Docs/Standards/19-docker-compose-best-practices.md](./Docs/Standards/19-docker-compose-best-practices.md) - service configuration, environment management, networking setup, volume optimization, security hardening, performance tuning, multi-stage deployment
 
 ## 📋 Planning System
 

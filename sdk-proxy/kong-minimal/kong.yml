@@ -1,0 +1,146 @@
+_format_version: "3.0"
+_transform: true
+
+# Minimal Kong Configuration for SDK Proxy Testing
+# DB-less mode configuration for Anthropic API proxy with logging
+
+services:
+  # Anthropic Claude API Service
+  - name: anthropic-api
+    url: https://api.anthropic.com
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    retries: 2
+    connect_timeout: 10000
+    write_timeout: 60000
+    read_timeout: 60000
+    tags:
+      - anthropic
+      - claude-api
+
+routes:
+  # Main proxy route for /v1/messages
+  - name: claude-messages
+    service: anthropic-api
+    paths:
+      - /v1/messages
+    methods:
+      - POST
+    strip_path: false
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+    tags:
+      - claude-endpoint
+      
+  # Health check route
+  - name: health-check
+    service: anthropic-api
+    paths:
+      - /health
+    methods:
+      - GET
+    strip_path: true
+    preserve_host: false
+    tags:
+      - health
+
+plugins:      
+  # Request/Response logging for debugging
+  - name: file-log
+    service: anthropic-api
+    config:
+      path: /tmp/kong-proxy.log
+      reopen: true
+      custom_fields_by_lua:
+        client_ip: 'return kong.request.get_forwarded_ip()'
+        request_id: 'return kong.request.get_header("x-request-id") or kong.request.get_id()'
+        
+  # Add proxy identification headers
+  - name: request-transformer
+    service: anthropic-api
+    config:
+      add:
+        headers:
+          - X-Kong-Proxy:true
+          - X-Kong-Proxy-Version:minimal-test-v1
+          - X-Kong-Request-ID:$(request_id)
+      
+  # Add response headers to confirm proxy processing
+  - name: response-transformer
+    service: anthropic-api
+    config:
+      add:
+        headers:
+          - X-Kong-Response:true
+          - X-Kong-Upstream-Latency:$(upstream_latency)
+          - X-Kong-Proxy-Latency:$(kong_latency)
+          
+  # CORS configuration for browser testing
+  - name: cors
+    service: anthropic-api
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - POST
+        - OPTIONS
+      headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-Type
+        - Authorization
+        - x-api-key
+        - anthropic-version
+        - anthropic-beta
+      exposed_headers:
+        - X-Kong-Response
+        - X-Kong-Upstream-Latency
+        - X-Kong-Proxy-Latency
+      credentials: true
+      max_age: 3600
+      
+  # Rate limiting for testing
+  - name: rate-limiting
+    service: anthropic-api
+    config:
+      minute: 60
+      hour: 1000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+      
+  # Request size limiting
+  - name: request-size-limiting
+    service: anthropic-api
+    config:
+      allowed_payload_size: 10  # 10MB limit
+      size_unit: megabytes
+      require_content_length: false
+
+# Optional: API key authentication (commented out for minimal setup)
+# consumers:
+#   - username: test-user
+#     custom_id: test-001
+#     tags:
+#       - test
+#       
+# keyauth_credentials:
+#   - consumer: test-user
+#     key: test-api-key
+#     
+# plugins:
+#   - name: key-auth
+#     service: anthropic-api
+#     config:
+#       key_names:
+#         - x-api-key
+#       hide_credentials: true
+#       anonymous: null
+#       key_in_header: true
+#       key_in_query: false
+#       key_in_body: false
+#       run_on_preflight: true

@@ -1,0 +1,11 @@
+{
+  "model": "claude-3-5-sonnet-20241022",
+  "max_tokens": 1024,
+  "messages": [
+    {
+      "role": "user",
+      "content": "I have an EC2 instance i-1234567890abcdef0 in us-east-1 that seems to be having connectivity issues. The instance has a private IP 10.0.1.50 and is part of a subnet with CIDR 10.0.1.0/24. Can you help me troubleshoot why it can't connect to the RDS instance prod-database.us-east-1.rds.amazonaws.com?"
+    }
+  ],
+  "system": "You are a helpful AWS infrastructure assistant. Analyze the provided AWS resources and help troubleshoot issues."
+}

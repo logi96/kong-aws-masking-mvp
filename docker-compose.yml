@@ -22,6 +22,7 @@ services:
         KONG_VERSION: 3.7
     container_name: kong-gateway
     hostname: kong
+    mem_limit: 1024m  # 직접 메모리 제한 설정
     environment:
       <<: *common-variables
       KONG_DATABASE: "off"
@@ -65,10 +66,10 @@ services:
       resources:
         limits:
           cpus: '${KONG_CPU_LIMIT:-0.5}'
-          memory: ${KONG_MEMORY_LIMIT:-512M}
+          memory: ${KONG_MEMORY_LIMIT:-1024M}  # 512M → 1024M (2x 증설)
         reservations:
           cpus: '0.25'
-          memory: 256M
+          memory: 512M  # 256M → 512M (2x 증설)
     security_opt:
       - no-new-privileges:true
 
@@ -77,31 +78,15 @@ services:
     build:
       context: .
       dockerfile: docker/backend/Dockerfile
-      target: ${BUILD_TARGET:-development}
+      target: ${BUILD_TARGET:-test}
       args:
         NODE_VERSION: 20-alpine
     container_name: backend-api
     hostname: backend
+    env_file:
+      - ./backend/.env.test
     environment:
       <<: *common-variables
-      NODE_ENV: ${NODE_ENV:-development}
-      PORT: 3000
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-3-5-sonnet-20241022}
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
-      CLAUDE_API_URL: ${CLAUDE_API_URL:-http://kong:8000/claude-proxy/v1/messages}
-      HTTP_PROXY: http://kong:8000
-      HTTPS_PROXY: http://kong:8000
-      REQUEST_TIMEOUT: ${REQUEST_TIMEOUT:-5000}
-      MAX_RETRIES: ${MAX_RETRIES:-3}
-      RETRY_DELAY: ${RETRY_DELAY:-1000}
-      ENABLE_MOCK_MODE: ${ENABLE_MOCK_MODE:-false}
-      ENABLE_DEBUG_LOGGING: ${ENABLE_DEBUG_LOGGING:-false}
-      ENABLE_METRICS: ${ENABLE_METRICS:-true}
-      AWS_TEST_MODE: ${AWS_TEST_MODE:-false}
     ports:
       - "3000:3000"
     volumes:
@@ -209,13 +194,13 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: 172.25.0.0/24
   backend:
     driver: bridge
     # Removed internal: true to allow external API access
     ipam:
       config:
-        - subnet: 172.31.0.0/24
+        - subnet: 172.26.0.0/24
 
 volumes:
   kong-tmp:

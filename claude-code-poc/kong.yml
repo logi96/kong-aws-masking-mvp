@@ -1,0 +1,48 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: claude-api
+    url: https://api.anthropic.com
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    path: /v1/messages
+    retries: 2
+    connect_timeout: 5000
+    write_timeout: 60000
+    read_timeout: 60000
+
+routes:
+  - name: claude-proxy-route
+    service: claude-api
+    paths:
+      - /claude-proxy/v1/messages
+    strip_path: true
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+
+plugins:
+  # Request logging
+  - name: file-log
+    route: claude-proxy-route
+    config:
+      path: /tmp/kong-claude-requests.log
+      
+  # Response transformer to add tracking headers
+  - name: response-transformer
+    route: claude-proxy-route
+    config:
+      add:
+        headers:
+          - "X-Kong-Proxy:true"
+          - "X-Masked-Request:true"
+          
+  # Request transformer to ensure proper headers
+  - name: request-transformer
+    route: claude-proxy-route
+    config:
+      add:
+        headers:
+          - "Accept-Encoding:identity"  # Prevent compression for unmasking

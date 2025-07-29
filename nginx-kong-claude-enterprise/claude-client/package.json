@@ -1,0 +1,23 @@
+{
+  "name": "claude-client-test",
+  "version": "1.0.0",
+  "description": "Claude Code SDK test client for enterprise integration",
+  "main": "index.js",
+  "scripts": {
+    "test": "./test-claude.sh",
+    "test:ec2": "node test-ec2.js",
+    "test:s3": "node test-s3.js",
+    "test:multi": "node test-multi-resource.js",
+    "test:all": "npm run test:ec2 && npm run test:s3 && npm run test:multi"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.3",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "chalk": "^4.1.2",
+    "table": "^6.8.2"
+  },
+  "author": "",
+  "license": "MIT"
+}

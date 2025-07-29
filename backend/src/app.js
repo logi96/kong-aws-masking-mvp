@@ -16,6 +16,10 @@ const { router: quickMaskTestRouter } = require('./api/routes/quick-mask-test');
 const monitoringRouter = require('../monitoring-api');
 const { notFoundHandler, globalErrorHandler } = require('./api/middlewares/errorHandler');
 
+// Redis Event Subscriber import
+const RedisEventSubscriber = require('./services/redis/RedisEventSubscriber');
+const logger = require('../utils/logger');
+
 /**
  * Express 애플리케이션 생성 및 설정
  * @returns {express.Application} 설정된 Express 앱
@@ -66,6 +70,34 @@ function createApp() {
   
   // 9. 글로벌 에러 핸들러
   app.use(globalErrorHandler);
+  
+  // 10. Redis Event Subscriber 초기화 및 통합
+  if (process.env.ENABLE_REDIS_EVENTS === 'true') {
+    const redisSubscriber = new RedisEventSubscriber();
+    
+    // Express 앱에서 접근 가능하도록 저장
+    app.locals.redisSubscriber = redisSubscriber;
+    
+    // 비동기 시작 (서버 시작을 차단하지 않음)
+    setImmediate(async () => {
+      try {
+        await redisSubscriber.start();
+        logger.info('Redis Event Subscriber started successfully', {
+          service: 'express-app',
+          redis_events_enabled: true
+        });
+      } catch (error) {
+        logger.error('Failed to start Redis Event Subscriber:', error, {
+          service: 'express-app'
+        });
+      }
+    });
+  } else {
+    logger.info('Redis Event Subscription is disabled', {
+      service: 'express-app',
+      redis_events_enabled: false
+    });
+  }
   
   return app;
 }

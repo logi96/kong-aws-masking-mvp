@@ -1,0 +1,128 @@
+_format_version: "3.0"
+_transform: true
+
+# Kong declarative configuration for Claude API integration
+
+services:
+  # Claude API Service
+  - name: claude-api-service
+    url: https://api.anthropic.com/v1/messages
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+    path: /v1/messages
+    retries: 3
+    connect_timeout: 5000
+    write_timeout: 60000
+    read_timeout: 60000
+    tags:
+      - external-api
+      - claude
+  
+  # Health check service
+  - name: health-service
+    host: localhost
+    port: 8001
+    path: /status
+
+routes:
+  # Claude proxy endpoint - Nginx가 이 경로로 요청
+  - name: claude-proxy
+    service: claude-api-service
+    paths:
+      - /claude-proxy/v1/messages
+    methods:
+      - POST
+    strip_path: true
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+    tags:
+      - masking-required
+  
+  # Health check route
+  - name: health-check
+    paths:
+      - /health
+    methods:
+      - GET
+    strip_path: false
+    protocols:
+      - http
+    service: health-service
+
+plugins:
+  # AWS Masker Plugin - Claude proxy route에 적용
+  - name: aws-masker
+    route: claude-proxy
+    config:
+      # Redis 설정
+      use_redis: true
+      mapping_ttl: 86400  # 24시간
+      max_entries: 10000
+      
+      # 마스킹 옵션
+      mask_ec2_instances: true
+      mask_s3_buckets: true
+      mask_rds_instances: true
+      mask_private_ips: true
+      preserve_structure: true
+      log_masked_requests: true
+      
+      # API 키 (환경 변수로 전달됨)
+      anthropic_api_key: ${ANTHROPIC_API_KEY}
+
+  # Request Transformer - API 키 헤더 추가
+  - name: request-transformer
+    route: claude-proxy
+    config:
+      add:
+        headers:
+          - "x-api-key:${ANTHROPIC_API_KEY}"
+          - "anthropic-version:2023-06-01"
+      remove:
+        headers:
+          - "x-forwarded-for"
+          - "x-forwarded-proto"
+          - "x-forwarded-host"
+
+  # Response Transformer - 추적 헤더 추가
+  - name: response-transformer
+    route: claude-proxy
+    config:
+      add:
+        headers:
+          - "X-Kong-Proxy:true"
+          - "X-Masked-Request:true"
+
+  # Rate Limiting (선택적)
+  - name: rate-limiting
+    route: claude-proxy
+    config:
+      minute: 60
+      hour: 1000
+      policy: local
+      fault_tolerant: true
+      hide_client_headers: false
+
+  # CORS (필요시)
+  - name: cors
+    route: claude-proxy
+    config:
+      origins:
+        - "*"
+      methods:
+        - POST
+        - OPTIONS
+      headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-Type
+        - x-api-key
+        - anthropic-version
+      exposed_headers:
+        - X-Kong-Proxy
+        - X-Masked-Request
+      credentials: false
+      max_age: 3600

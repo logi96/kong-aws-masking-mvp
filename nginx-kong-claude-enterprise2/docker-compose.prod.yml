@@ -75,7 +75,7 @@ services:
       - KONG_PROXY_ERROR_LOG=/dev/stderr
       - KONG_ADMIN_ERROR_LOG=/dev/stderr
       - KONG_LOG_LEVEL=${KONG_LOG_LEVEL:-info}
-      - KONG_MEM_CACHE_SIZE=${KONG_MEM_CACHE_SIZE:-1024m}
+      - KONG_MEM_CACHE_SIZE=${KONG_MEM_CACHE_SIZE:-2048m}
       - KONG_PLUGINS=bundled,aws-masker
       - KONG_LUA_PACKAGE_PATH=/usr/local/kong/plugins/?.lua;/usr/local/kong/plugins/?/init.lua;;
       - KONG_NGINX_WORKER_PROCESSES=${KONG_WORKER_PROCESSES:-auto}
@@ -113,10 +113,10 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: ${KONG_MEMORY_LIMIT:-2G}
+          memory: ${KONG_MEMORY_LIMIT:-4G}
         reservations:
           cpus: '1.0'
-          memory: 1G
+          memory: 2G
     healthcheck:
       <<: *healthcheck-defaults
       test: ["CMD-SHELL", "kong health && curl -f http://localhost:8100/status || exit 1"]

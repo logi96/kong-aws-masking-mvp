@@ -49,6 +49,22 @@ routes:
     response_buffering: true
     tags:
       - masking-required
+      
+  # Transparent proxy for api.anthropic.com
+  - name: anthropic-transparent
+    service: claude-api-service
+    hosts:
+      - api.anthropic.com
+    paths:
+      - /v1/messages
+    methods:
+      - POST
+    strip_path: false
+    preserve_host: false
+    request_buffering: true
+    response_buffering: true
+    tags:
+      - masking-required
 
 # Plugins
 plugins:

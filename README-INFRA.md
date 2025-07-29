@@ -45,10 +45,13 @@ kong-aws-masking-mvp/
 │   │   └── Dockerfile
 │   └── backend/           # Backend API Dockerfile
 │       └── Dockerfile
-├── config/                # Configuration files
-│   ├── kong/             # Kong configurations
-│   │   └── kong.yml      # Declarative config
-│   └── backend/          # Backend configurations
+├── kong/                  # Kong Gateway files
+│   ├── kong.yml          # Declarative configuration
+│   └── plugins/          # Custom plugins directory
+│       └── aws-masker/   # AWS masking plugin
+├── backend/               # Backend API files
+│   ├── environments/     # Environment configurations
+│   └── server.js         # Main API server
 ├── scripts/              # Utility scripts
 │   ├── setup.sh          # Initial setup script
 │   ├── reset.sh          # Environment reset
@@ -106,7 +109,7 @@ docker-compose logs -f [service-name]
 ### Making Changes
 
 #### Kong Configuration
-1. Edit `config/kong/kong.yml`
+1. Edit `kong/kong.yml`
 2. Restart Kong: `docker-compose restart kong`
 
 #### Kong Plugin Development
@@ -219,7 +222,7 @@ Run infrastructure validation tests
 ### Backup
 ```bash
 # Backup configurations
-tar -czf backup-config.tar.gz config/
+tar -czf backup-kong.tar.gz kong/
 
 # Backup volumes (if stateful)
 tar -czf backup-volumes.tar.gz .docker/volumes/
@@ -238,7 +241,7 @@ tar -czf backup-volumes.tar.gz .docker/volumes/
 ### For Kong Team
 - Plugin directory mounted at `/usr/local/share/lua/5.1/kong/plugins`
 - Kong Admin API available at `http://localhost:8001`
-- Declarative config at `config/kong/kong.yml`
+- Declarative config at `kong/kong.yml`
 
 ### For Backend Team
 - Source code mounted at `/app` in container

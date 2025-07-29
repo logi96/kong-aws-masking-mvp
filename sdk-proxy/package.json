@@ -1,0 +1,42 @@
+{
+  "name": "sdk-proxy-test",
+  "version": "1.0.0",
+  "description": "Anthropic SDK proxy test for Kong AWS Masking MVP",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "node src/test-sdk-proxy.js",
+    "test:basic": "node test-basic-proxy.js",
+    "test:kong": "node test-kong-integration.js",
+    "test:sdk": "node src/test-sdk-proxy.js",
+    "test:all": "npm run test:basic && npm run test && npm run test:kong",
+    "dev": "node --watch src/test-sdk-proxy.js",
+    "lint": "eslint .",
+    "type-check": "tsc --noEmit"
+  },
+  "keywords": [
+    "anthropic",
+    "sdk",
+    "proxy",
+    "kong",
+    "testing"
+  ],
+  "author": "Kong AWS Masking MVP Team",
+  "license": "MIT",
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.14.1",
+    "https-proxy-agent": "^7.0.2",
+    "undici": "^6.2.1"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/kong-aws-masking-mvp.git"
+  }
+}

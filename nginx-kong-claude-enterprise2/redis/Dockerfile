@@ -10,11 +10,14 @@ RUN apk add --no-cache \
 RUN mkdir -p /var/log/redis && \
     chown redis:redis /var/log/redis
 
-# Copy custom Redis configuration
-COPY redis.conf /usr/local/etc/redis/redis.conf
+# Copy entrypoint script
+COPY docker-entrypoint.sh /usr/local/bin/
 
-# Ensure proper permissions
-RUN chown redis:redis /usr/local/etc/redis/redis.conf
+# Make entrypoint executable
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Ensure proper permissions for data directory
+RUN mkdir -p /data && chown redis:redis /data
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
@@ -23,5 +26,5 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=3 \
 # Expose Redis port
 EXPOSE 6379
 
-# Run Redis with custom config
-CMD ["redis-server", "/usr/local/etc/redis/redis.conf"]
+# Set entrypoint
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

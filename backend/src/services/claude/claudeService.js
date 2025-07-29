@@ -270,7 +270,7 @@ For each opportunity, provide:
           messageLength: JSON.stringify(request.messages).length
         });
         
-        // Direct Claude API call (Kong transparently intercepts for masking)
+        // Call Claude API directly (Kong should intercept transparently)
         const response = await axios.post(
           this.claudeApiUrl,
           request,
@@ -278,7 +278,9 @@ For each opportunity, provide:
             headers: {
               'Content-Type': 'application/json',
               'x-api-key': this.apiKey,
-              'anthropic-version': '2023-06-01'
+              'anthropic-version': '2023-06-01',
+              // CRITICAL FIX: Prevent gzip compression to enable Kong unmasking
+              'Accept-Encoding': 'identity'
             },
             timeout: this.timeout
           }

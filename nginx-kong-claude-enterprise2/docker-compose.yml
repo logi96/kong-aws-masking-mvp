@@ -11,15 +11,14 @@ services:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
       - ./redis/data:/data
-      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
       - ./logs/redis:/var/log/redis
-    command: redis-server /usr/local/etc/redis/redis.conf
     environment:
       - TZ=${TZ:-Asia/Seoul}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     networks:
       - claude-network
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--raw", "incr", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -42,7 +41,7 @@ services:
       - KONG_PROXY_ERROR_LOG=/dev/stderr
       - KONG_ADMIN_ERROR_LOG=/dev/stderr
       - KONG_LOG_LEVEL=${KONG_LOG_LEVEL:-info}
-      - KONG_MEM_CACHE_SIZE=${KONG_MEMORY_LIMIT:-1024m}
+      - KONG_MEM_CACHE_SIZE=${KONG_MEM_CACHE_SIZE:-2048m}
       - KONG_PLUGINS=bundled,aws-masker
       - KONG_LUA_PACKAGE_PATH=/usr/local/kong/plugins/?.lua;/usr/local/kong/plugins/?/init.lua;;
       - REDIS_HOST=redis
@@ -65,6 +64,14 @@ services:
       timeout: 10s
       retries: 3
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: ${KONG_MEMORY_LIMIT:-4G}
+        reservations:
+          cpus: '1.0'
+          memory: 2G
 
   # Nginx - Enterprise proxy layer
   nginx:
