@@ -1,8 +1,9 @@
-# Environment files
+# Environment files (but allow .env.example)
 .env
 .env.local
 .env.production
 *.env
+!.env.example
 
 # Node modules
 node_modules/
