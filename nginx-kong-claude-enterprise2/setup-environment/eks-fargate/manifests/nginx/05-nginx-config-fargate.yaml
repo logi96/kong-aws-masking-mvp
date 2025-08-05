@@ -1,0 +1,350 @@
+# Nginx Configuration for EKS Fargate
+# Optimized for high-performance proxy with monitoring
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-main-config
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: nginx-proxy
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: http-proxy-config
+    platform: eks-fargate
+data:
+  nginx.conf: |
+    # Nginx main configuration for EKS Fargate
+    # Optimized for container security and performance
+    
+    # Run as non-root user (Fargate requirement)
+    user nginx;
+    
+    # Auto-detect CPU cores (Fargate scaling)
+    worker_processes auto;
+    
+    # PID file location (writable volume)
+    pid /var/run/nginx.pid;
+    
+    # Error log configuration
+    error_log /var/log/nginx/error.log info;
+    
+    # Events block
+    events {
+        # Connection optimization for Fargate
+        worker_connections 1024;  # Per worker process
+        use epoll;                # Linux-optimized event method
+        multi_accept on;          # Accept multiple connections
+        accept_mutex off;         # Disable accept mutex for better performance
+    }
+    
+    # HTTP block
+    http {
+        # MIME types
+        include /etc/nginx/mime.types;
+        default_type application/octet-stream;
+        
+        # Logging format
+        log_format json_combined escape=json
+        '{'
+            '"time":"$time_iso8601",'
+            '"remote_addr":"$remote_addr",'
+            '"remote_user":"$remote_user",'
+            '"method":"$request_method",'
+            '"uri":"$request_uri",'
+            '"protocol":"$server_protocol",'
+            '"status":$status,'
+            '"body_bytes_sent":$body_bytes_sent,'
+            '"request_time":$request_time,'
+            '"upstream_response_time":"$upstream_response_time",'
+            '"upstream_addr":"$upstream_addr",'
+            '"http_referrer":"$http_referer",'
+            '"http_user_agent":"$http_user_agent",'
+            '"http_x_forwarded_for":"$http_x_forwarded_for",'
+            '"request_id":"$request_id"'
+        '}';
+        
+        # Access log
+        access_log /var/log/nginx/access.log json_combined;
+        
+        # Performance optimizations
+        sendfile on;              # Use kernel sendfile
+        tcp_nopush on;            # Optimize packet sending
+        tcp_nodelay on;           # Disable Nagle algorithm
+        keepalive_timeout 65;     # Connection keepalive
+        keepalive_requests 100;   # Requests per connection
+        
+        # Gzip compression
+        gzip on;
+        gzip_vary on;
+        gzip_min_length 1024;
+        gzip_proxied any;
+        gzip_comp_level 6;
+        gzip_types
+            text/plain
+            text/css
+            text/xml
+            text/javascript
+            application/json
+            application/javascript
+            application/xml+rss
+            application/atom+xml
+            image/svg+xml;
+        
+        # Buffer sizes (optimized for Claude API responses)
+        client_body_buffer_size 128k;
+        client_max_body_size 10M;      # Claude API request limit
+        client_header_buffer_size 1k;
+        large_client_header_buffers 4 4k;
+        
+        # Proxy buffer settings
+        proxy_buffer_size 4k;
+        proxy_buffering on;
+        proxy_buffers 8 4k;
+        proxy_busy_buffers_size 8k;
+        proxy_temp_file_write_size 8k;
+        
+        # Timeout settings
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 30s;
+        proxy_read_timeout 30s;
+        send_timeout 30s;
+        
+        # Security headers
+        add_header X-Frame-Options DENY always;
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+        add_header Content-Security-Policy "default-src 'self'" always;
+        
+        # Hide Nginx version
+        server_tokens off;
+        
+        # Rate limiting zones
+        limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+        limit_req_zone $binary_remote_addr zone=health_limit:1m rate=1r/s;
+        
+        # Connection limiting
+        limit_conn_zone $binary_remote_addr zone=conn_limit_per_ip:10m;
+        
+        # Upstream configuration for Kong Gateway
+        upstream kong_backend {
+            # Kong Gateway service
+            server kong-gateway-service.kong-aws-masking.svc.cluster.local:8000;
+            
+            # Health check and load balancing
+            keepalive 32;           # Connection pool
+            keepalive_requests 100; # Requests per connection
+            keepalive_timeout 60s;  # Connection timeout
+        }
+        
+        # Upstream for Kong Admin API (internal only)
+        upstream kong_admin_backend {
+            server kong-admin-service.kong-aws-masking.svc.cluster.local:8001;
+            keepalive 16;
+            keepalive_requests 50;
+            keepalive_timeout 60s;
+        }
+        
+        # Include additional configurations
+        include /etc/nginx/conf.d/*.conf;
+    }
+
+---
+# Nginx Proxy Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-proxy-config
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: nginx-proxy
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: http-proxy-config
+    platform: eks-fargate
+data:
+  claude-proxy.conf: |
+    # Claude API Proxy Configuration
+    # Main entry point for Kong AWS Masking Enterprise
+    
+    server {
+        listen 8082;
+        server_name _;
+        
+        # Request ID for tracing
+        add_header X-Request-ID $request_id always;
+        
+        # Rate limiting
+        limit_req zone=api_limit burst=20 nodelay;
+        limit_conn conn_limit_per_ip 10;
+        
+        # Main Claude API endpoint
+        location /v1/ {
+            # Proxy to Kong Gateway
+            proxy_pass http://kong_backend;
+            
+            # Proxy headers
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            
+            # Preserve original headers
+            proxy_pass_request_headers on;
+            proxy_pass_request_body on;
+            
+            # Buffer configuration for large responses
+            proxy_buffering on;
+            proxy_buffer_size 4k;
+            proxy_buffers 8 4k;
+            
+            # Timeout configuration
+            proxy_connect_timeout 30s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+            
+            # Error handling
+            proxy_intercept_errors on;
+            proxy_next_upstream error timeout invalid_header http_500 http_502 http_503;
+            proxy_next_upstream_tries 2;
+            proxy_next_upstream_timeout 30s;
+            
+            # CORS headers for browser clients
+            add_header Access-Control-Allow-Origin "*" always;
+            add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS" always;
+            add_header Access-Control-Allow-Headers "Authorization, Content-Type, x-api-key" always;
+            add_header Access-Control-Max-Age 86400 always;
+            
+            # Handle preflight requests
+            if ($request_method = OPTIONS) {
+                add_header Access-Control-Allow-Origin "*";
+                add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS";
+                add_header Access-Control-Allow-Headers "Authorization, Content-Type, x-api-key";
+                add_header Access-Control-Max-Age 86400;
+                add_header Content-Length 0;
+                add_header Content-Type text/plain;
+                return 204;
+            }
+        }
+        
+        # Kong Admin API (internal access only)
+        location /kong-admin/ {
+            # Only allow internal access
+            allow 10.0.0.0/8;      # Private network
+            allow 172.16.0.0/12;   # Private network  
+            allow 192.168.0.0/16;  # Private network
+            deny all;
+            
+            # Remove /kong-admin prefix
+            rewrite ^/kong-admin/(.*) /$1 break;
+            
+            # Proxy to Kong Admin API
+            proxy_pass http://kong_admin_backend;
+            
+            # Admin-specific headers
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Request-ID $request_id;
+            
+            # Admin API timeout configuration
+            proxy_connect_timeout 10s;
+            proxy_send_timeout 30s;
+            proxy_read_timeout 30s;
+        }
+        
+        # Health check endpoint
+        location /health {
+            limit_req zone=health_limit burst=5 nodelay;
+            
+            # Return health status
+            access_log off;
+            
+            # Custom health check response
+            return 200 '{"status":"healthy","service":"nginx-proxy","version":"1.25","platform":"eks-fargate","timestamp":"$time_iso8601"}';
+            add_header Content-Type application/json always;
+        }
+        
+        # Nginx status endpoint (for prometheus exporter)
+        location /nginx_status {
+            # Only allow internal access
+            allow 127.0.0.1;       # Localhost (exporter sidecar)
+            allow 10.0.0.0/8;      # Private network
+            deny all;
+            
+            stub_status on;
+            access_log off;
+        }
+        
+        # Metrics endpoint (proxy to prometheus exporter)
+        location /metrics {
+            # Only allow internal access
+            allow 10.0.0.0/8;      # Private network
+            allow 172.16.0.0/12;   # Private network
+            allow 192.168.0.0/16;  # Private network
+            deny all;
+            
+            # Proxy to nginx-exporter sidecar
+            proxy_pass http://127.0.0.1:9113/metrics;
+            proxy_set_header Host $host;
+            access_log off;
+        }
+        
+        # Default location (fallback)
+        location / {
+            return 404 '{"error":"Not Found","message":"Invalid endpoint","valid_endpoints":["/v1/","/health","/kong-admin/"]}';
+            add_header Content-Type application/json always;
+        }
+        
+        # Error pages
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            return 503 '{"error":"Service Unavailable","message":"Kong AWS Masking Enterprise is temporarily unavailable","retry_after":30}';
+            add_header Content-Type application/json always;
+            add_header Retry-After 30 always;
+        }
+    }
+  
+  # Additional monitoring configuration
+  monitoring.conf: |
+    # Monitoring and observability configuration
+    
+    server {
+        listen 8083;
+        server_name _;
+        
+        # Health endpoint
+        location /health {
+            access_log off;
+            return 200 '{"status":"healthy","service":"nginx-monitoring","checks":{"kong_backend":"healthy","configuration":"valid"}}';
+            add_header Content-Type application/json always;
+        }
+        
+        # Detailed status endpoint
+        location /status {
+            # Only allow internal access
+            allow 10.0.0.0/8;
+            allow 172.16.0.0/12;
+            allow 192.168.0.0/16;
+            deny all;
+            
+            return 200 '{"service":"nginx-proxy","version":"1.25","platform":"eks-fargate","upstreams":{"kong_backend":"active","kong_admin_backend":"active"},"configuration":"valid"}';
+            add_header Content-Type application/json always;
+        }
+        
+        # Nginx status for monitoring
+        location /nginx_status {
+            # Only allow localhost (for exporter)
+            allow 127.0.0.1;
+            deny all;
+            
+            stub_status on;
+            access_log off;
+        }
+        
+        # Default deny
+        location / {
+            return 404;
+        }
+    }

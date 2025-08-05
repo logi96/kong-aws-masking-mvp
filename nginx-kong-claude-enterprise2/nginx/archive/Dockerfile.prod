@@ -1,0 +1,80 @@
+# Multi-stage Dockerfile for Nginx Proxy with Production Optimizations
+# Production-ready with security hardening and performance tuning
+
+# Build stage for configuration validation
+FROM nginx:1.27-alpine AS config-validator
+
+# Install validation tools
+RUN apk add --no-cache nginx-mod-http-echo
+
+# Copy configuration files for validation
+COPY nginx.conf /tmp/nginx.conf
+COPY conf.d/ /tmp/conf.d/
+
+# Validate Nginx configuration syntax
+RUN nginx -t -c /tmp/nginx.conf || (echo "Nginx config validation failed" && exit 1)
+
+# Production runtime stage
+FROM nginx:1.27-alpine AS production
+
+# Install production dependencies with security updates
+RUN apk add --no-cache --upgrade \
+    curl \
+    ca-certificates \
+    tzdata \
+    && apk del --purge
+
+# Create nginx user directories with proper permissions
+RUN mkdir -p /var/cache/nginx/client_temp \
+             /var/cache/nginx/proxy_temp \
+             /var/cache/nginx/fastcgi_temp \
+             /var/cache/nginx/uwsgi_temp \
+             /var/cache/nginx/scgi_temp \
+             /var/log/nginx \
+             /etc/nginx/ssl \
+    && chown -R nginx:nginx /var/cache/nginx \
+    && chown -R nginx:nginx /var/log/nginx \
+    && chmod -R 755 /var/cache/nginx
+
+# Remove default configurations
+RUN rm -rf /etc/nginx/conf.d/* \
+    && rm /etc/nginx/nginx.conf
+
+# Copy validated configuration files
+COPY --from=config-validator /tmp/nginx.conf /etc/nginx/nginx.conf
+COPY --from=config-validator /tmp/conf.d/ /etc/nginx/conf.d/
+
+# Create custom error pages for production
+RUN echo '{"error":"Bad Gateway","code":502,"timestamp":"${msec}"}' > /usr/share/nginx/html/502.json \
+    && echo '{"error":"Service Unavailable","code":503,"timestamp":"${msec}"}' > /usr/share/nginx/html/503.json \
+    && echo '{"error":"Gateway Timeout","code":504,"timestamp":"${msec}"}' > /usr/share/nginx/html/504.json
+
+# Security hardening: run as non-root user
+USER nginx
+
+# Production environment variables
+ENV NGINX_WORKER_PROCESSES=auto \
+    NGINX_WORKER_CONNECTIONS=2048 \
+    NGINX_WORKER_RLIMIT_NOFILE=65535 \
+    NGINX_ERROR_LOG_LEVEL=warn \
+    NGINX_ACCESS_LOG_FORMAT=json
+
+# Production health check with enhanced monitoring
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8082/health || exit 1
+
+# Expose ports
+EXPOSE 8082 9113
+
+# Production signal handling
+STOPSIGNAL SIGQUIT
+
+# Production startup command with proper PID handling
+CMD ["nginx", "-g", "daemon off;"]
+
+# Metadata labels for production tracking
+LABEL maintainer="Kong AWS Masking Team" \
+      version="1.0.0" \
+      description="Production Nginx Proxy for Kong AWS Masking" \
+      environment="production" \
+      security.scan="required"

@@ -1,0 +1,69 @@
+# Kubernetes Namespace for Kong AWS Masking Enterprise
+# EKS + ElastiCache Redis Integration
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kong-aws-masking
+  labels:
+    name: kong-aws-masking
+    version: "v2.0.0-elasticache"
+    environment: "production"
+    project: "kong-aws-masking-enterprise"
+  annotations:
+    description: "Kong AWS Masking Enterprise with ElastiCache Redis integration"
+    created-by: "kong-eks-installation-script"
+    aws-region: "ap-northeast-2"
+    elasticache-integration: "enabled"
+---
+# Resource Quota for the namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kong-aws-masking-quota
+  namespace: kong-aws-masking
+spec:
+  hard:
+    requests.cpu: "4"
+    requests.memory: 8Gi
+    limits.cpu: "8"
+    limits.memory: 16Gi
+    pods: "20"
+    services: "10"
+    configmaps: "10"
+    secrets: "10"
+    persistentvolumeclaims: "5"
+---
+# Network Policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kong-aws-masking-netpol
+  namespace: kong-aws-masking
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kong-aws-masking
+    ports:
+    - protocol: TCP
+      port: 8000  # Kong proxy
+    - protocol: TCP
+      port: 8001  # Kong admin
+    - protocol: TCP
+      port: 8082  # Nginx proxy
+    - protocol: TCP
+      port: 3000  # Backend API
+  egress:
+  - to: []  # Allow all outbound (for Claude API, AWS services)
+    ports:
+    - protocol: TCP
+      port: 443   # HTTPS
+    - protocol: TCP
+      port: 80    # HTTP
+    - protocol: TCP
+      port: 6379  # ElastiCache Redis

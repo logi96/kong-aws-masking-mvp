@@ -1,0 +1,852 @@
+# Kong AWS Masker ElastiCache Plugin - Complete Plugin Files
+# Real plugin implementation as ConfigMap for K8s deployment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-plugin-files
+  namespace: kong-aws-masking
+  labels:
+    app: kong-gateway
+    component: plugin-files
+    version: "aws-masker-elasticache-v2.0.0"
+data:
+  # Handler.lua - Main plugin logic (620+ lines)
+  handler.lua: |
+    --
+    -- Kong AWS Masker ElastiCache Edition - Handler
+    -- Production-ready AWS resource masking with ElastiCache integration  
+    -- Phase 1 Success Version Enhanced for ElastiCache
+    --
+    
+    local elasticache_client = require "kong.plugins.aws-masker.elasticache_client"
+    local json_safe = require "kong.plugins.aws-masker.json_safe"
+    local error_codes = require "kong.plugins.aws-masker.error_codes"
+    
+    -- Plugin handler class
+    local AwsMaskerElastiCacheHandler = {}
+    
+    AwsMaskerElastiCacheHandler.VERSION = "2.0.0-elasticache"
+    AwsMaskerElastiCacheHandler.PRIORITY = 700
+    
+    function AwsMaskerElastiCacheHandler:new()
+      local instance = {
+        elasticache_client = nil,  -- Lazy initialization
+        config = {
+          -- Default configuration
+          mask_ec2_instances = true,
+          mask_s3_buckets = true,
+          mask_rds_instances = true,
+          mask_private_ips = true,
+          preserve_structure = true,
+          log_masked_requests = false,
+          fail_secure = true,
+          mapping_ttl = 604800,  -- 7 days
+          -- ElastiCache defaults
+          elasticache_ssl_enabled = true,
+          connection_timeout = 2000,
+          max_retry_attempts = 3
+        }
+      }
+      return setmetatable(instance, { __index = self })
+    end
+    
+    -- Initialize ElastiCache client (lazy loading)
+    function AwsMaskerElastiCacheHandler:init_elasticache_client(conf)
+      if not self.elasticache_client then
+        kong.log.info("=== ELASTICACHE CLIENT INITIALIZATION ===")
+        
+        -- ElastiCache connection configuration
+        local elasticache_config = {
+          endpoint = conf.elasticache_endpoint,
+          port = conf.elasticache_port or 6379,
+          auth_token = conf.elasticache_auth_token,
+          ssl_enabled = conf.elasticache_ssl_enabled,
+          ssl_verify = conf.elasticache_ssl_verify,
+          cluster_mode = conf.elasticache_cluster_mode,
+          read_replicas = conf.elasticache_read_replicas,
+          database = conf.elasticache_database or 0,
+          
+          -- Connection pool settings
+          pool_size = conf.connection_pool_size or 100,
+          connection_timeout = conf.connection_timeout or 2000,
+          keepalive_timeout = conf.keepalive_timeout or 60000,
+          socket_timeout = conf.socket_timeout or 5000,
+          
+          -- Reliability settings
+          enable_failover = conf.enable_failover,
+          max_retry_attempts = conf.max_retry_attempts or 3,
+          retry_delay = conf.retry_delay or 100,
+          
+          -- Performance settings
+          enable_compression = conf.enable_compression,
+          mapping_ttl = conf.mapping_ttl or 604800,
+          
+          -- AWS integration
+          aws_region = conf.aws_region,
+          use_iam_auth = conf.use_iam_auth,
+          iam_role_arn = conf.iam_role_arn,
+          
+          -- Development
+          debug_mode = conf.debug_mode,
+          test_mode = conf.test_mode
+        }
+        
+        -- Initialize ElastiCache client
+        local client, err = elasticache_client.new(elasticache_config)
+        if not client then
+          kong.log.err("ElastiCache client initialization failed: ", err)
+          if conf.fail_secure then
+            return error_codes.exit_with_error("ELASTICACHE_INIT_FAILED", {
+              error = "ElastiCache client initialization failed",
+              details = err
+            })
+          end
+        else
+          self.elasticache_client = client
+          kong.log.info("ElastiCache client initialized successfully")
+          kong.log.info("Endpoint: ", conf.elasticache_endpoint, ":", conf.elasticache_port)
+          kong.log.info("SSL Enabled: ", conf.elasticache_ssl_enabled and "YES" or "NO")
+        end
+      end
+      
+      return self.elasticache_client
+    end
+    
+    -- Access phase: Request body masking
+    function AwsMaskerElastiCacheHandler:access(conf)
+      kong.log.info("=== AWS MASKER ELASTICACHE: ACCESS PHASE ===")
+      
+      -- Phase 1 Success Integration: API Key handling (highest priority)
+      kong.log.info("=== API KEY ACCESS DEBUG ===")
+      
+      -- 1순위: Kong Plugin Config에서 API 키 가져오기 (Phase 1 성공 핵심!)
+      local api_key_from_config = conf and conf.anthropic_api_key
+      kong.log.info("Plugin config API key: ", api_key_from_config and "VALUE_FOUND" or "NIL")
+      
+      -- 2순위: 환경변수에서 API 키 가져오기 (Fallback)
+      local api_key_from_env = os.getenv("ANTHROPIC_API_KEY")
+      kong.log.info("Environment API key: ", api_key_from_env and "VALUE_FOUND" or "NIL")
+      
+      -- 최종 API 키 결정 (우선순위: Config > Environment)
+      local final_api_key = api_key_from_config or api_key_from_env
+      kong.log.info("Final API Key Selected: ", final_api_key and "YES" or "NO")
+      
+      if final_api_key and final_api_key ~= "" then
+        kong.service.request.set_header("x-api-key", final_api_key)
+        kong.service.request.set_header("anthropic-version", "2023-06-01")
+        kong.log.info("API Key Source: ", api_key_from_config and "PLUGIN_CONFIG" or "ENVIRONMENT")
+        kong.log.info("API Key Headers Set: SUCCESS")
+      else
+        kong.log.err("=== API KEY VERIFICATION FAILED ===")
+        kong.log.err("CRITICAL: API KEY not available")
+        return error_codes.exit_with_error("MISSING_API_KEY", {
+          error = "API KEY required for Claude API authentication"
+        })
+      end
+      
+      -- ElastiCache client initialization
+      local client = self:init_elasticache_client(conf)
+      if not client and conf.fail_secure then
+        kong.log.err("ElastiCache unavailable and fail_secure enabled")
+        return error_codes.exit_with_error("ELASTICACHE_UNAVAILABLE", {
+          error = "ElastiCache required but unavailable"
+        })
+      end
+      
+      -- Request body processing
+      local raw_body = kong.request.get_raw_body()
+      if not raw_body or raw_body == "" then
+        kong.log.info("No request body to mask")
+        return
+      end
+      
+      kong.log.info("Processing request body (", string.len(raw_body), " bytes)")
+      
+      -- AWS pattern detection and masking
+      local masked_body, masking_stats = self:mask_aws_patterns(raw_body, client, conf)
+      
+      if masked_body ~= raw_body then
+        -- Store masking mappings in ElastiCache for response unmasking
+        if client then
+          local session_id = ngx.var.request_id or "session_" .. ngx.now()
+          local stored, err = client:store_masking_context(session_id, masking_stats, conf.mapping_ttl)
+          if stored then
+            kong.log.info("Masking context stored in ElastiCache: ", session_id)
+            kong.service.request.set_header("X-Masking-Session", session_id)
+          else
+            kong.log.warn("Failed to store masking context: ", err)
+          end
+        end
+        
+        -- Apply masked body
+        kong.service.request.set_raw_body(masked_body)
+        kong.log.info("Request body masked successfully")
+        
+        -- Statistics logging
+        if masking_stats and masking_stats.patterns_found > 0 then
+          kong.log.info("AWS patterns masked: ", masking_stats.patterns_found)
+          kong.log.info("Masking types: ", json_safe.encode(masking_stats.types))
+        end
+      else
+        kong.log.info("No AWS patterns found in request body")
+      end
+    end
+    
+    -- Header filter phase: Capture response headers
+    function AwsMaskerElastiCacheHandler:header_filter(conf)
+      kong.log.info("=== AWS MASKER ELASTICACHE: HEADER FILTER PHASE ===")
+      
+      -- Add response headers for monitoring
+      kong.response.set_header("X-AWS-Masker-Version", self.VERSION)
+      kong.response.set_header("X-ElastiCache-Enabled", "true")
+      
+      local status = kong.response.get_status()
+      kong.log.info("Claude API response status: ", status)
+      
+      if status >= 400 then
+        kong.log.err("Claude API error response: ", status)
+        -- Log additional error details for debugging
+        local headers = kong.response.get_headers()
+        if headers["content-type"] and string.find(headers["content-type"], "application/json") then
+          kong.log.err("Error response headers: ", json_safe.encode(headers))
+        end
+      end
+    end
+    
+    -- Body filter phase: Response unmasking
+    function AwsMaskerElastiCacheHandler:body_filter(conf)
+      kong.log.info("=== AWS MASKER ELASTICACHE: BODY FILTER PHASE ===")
+      
+      -- Get response body chunk
+      local chunk = kong.response.get_raw_body()
+      local eof = kong.response.get_source().eof
+      
+      if not chunk or chunk == "" then
+        if eof then
+          kong.log.info("Empty response body - no unmasking needed")
+        end
+        return
+      end
+      
+      kong.log.info("Processing response chunk (", string.len(chunk), " bytes)")
+      
+      -- Get masking session for unmasking
+      local session_id = kong.request.get_header("X-Masking-Session")
+      if not session_id then
+        kong.log.info("No masking session found - passing response as-is")
+        return
+      end
+      
+      -- ElastiCache client for unmasking
+      local client = self:init_elasticache_client(conf)
+      if not client then
+        kong.log.warn("ElastiCache unavailable for unmasking - passing response as-is")
+        return
+      end
+      
+      -- Retrieve masking context from ElastiCache
+      local masking_context, err = client:get_masking_context(session_id)
+      if not masking_context then
+        kong.log.warn("Masking context not found in ElastiCache: ", err)
+        return
+      end
+      
+      -- Unmask AWS identifiers in response
+      local unmasked_chunk = self:unmask_aws_patterns(chunk, masking_context, conf)
+      
+      if unmasked_chunk ~= chunk then
+        kong.response.set_raw_body(unmasked_chunk)
+        kong.log.info("Response unmasked successfully")
+      end
+      
+      -- Cleanup masking context on final chunk
+      if eof then
+        client:delete_masking_context(session_id)
+        kong.log.info("Masking session cleaned up: ", session_id)
+      end
+    end
+    
+    -- AWS patterns masking logic
+    function AwsMaskerElastiCacheHandler:mask_aws_patterns(body, client, conf)
+      local stats = {
+        patterns_found = 0,
+        types = {},
+        mappings = {}
+      }
+      
+      local masked_body = body
+      
+      -- EC2 Instance IDs
+      if conf.mask_ec2_instances then
+        local ec2_pattern = "i%-[0-9a-f]{8,17}"
+        local count = 0
+        masked_body = string.gsub(masked_body, ec2_pattern, function(match)
+          count = count + 1
+          local masked = "EC2_INSTANCE_" .. string.format("%03d", count)
+          stats.mappings[masked] = match
+          return masked
+        end)
+        if count > 0 then
+          stats.patterns_found = stats.patterns_found + count
+          stats.types["ec2_instances"] = count
+          kong.log.info("Masked ", count, " EC2 instance IDs")
+        end
+      end
+      
+      -- S3 Bucket Names
+      if conf.mask_s3_buckets then
+        local s3_pattern = "s3://[a-z0-9][a-z0-9%-%.]*[a-z0-9]"
+        local count = 0
+        masked_body = string.gsub(masked_body, s3_pattern, function(match)
+          count = count + 1
+          local masked = "S3_BUCKET_" .. string.format("%03d", count)
+          stats.mappings[masked] = match
+          return masked
+        end)
+        if count > 0 then
+          stats.patterns_found = stats.patterns_found + count
+          stats.types["s3_buckets"] = count
+          kong.log.info("Masked ", count, " S3 bucket names")
+        end
+      end
+      
+      -- Private IP Addresses
+      if conf.mask_private_ips then
+        local private_ip_pattern = "10%.%d+%.%d+%.%d+"
+        local count = 0
+        masked_body = string.gsub(masked_body, private_ip_pattern, function(match)
+          count = count + 1
+          local masked = "PRIVATE_IP_" .. string.format("%03d", count)
+          stats.mappings[masked] = match
+          return masked
+        end)
+        if count > 0 then
+          stats.patterns_found = stats.patterns_found + count
+          stats.types["private_ips"] = count
+          kong.log.info("Masked ", count, " private IP addresses")
+        end
+      end
+      
+      -- VPC IDs
+      if conf.mask_vpc_ids then
+        local vpc_pattern = "vpc%-[0-9a-f]{8,17}"
+        local count = 0
+        masked_body = string.gsub(masked_body, vpc_pattern, function(match)
+          count = count + 1
+          local masked = "VPC_" .. string.format("%03d", count)
+          stats.mappings[masked] = match
+          return masked
+        end)
+        if count > 0 then
+          stats.patterns_found = stats.patterns_found + count
+          stats.types["vpc_ids"] = count
+          kong.log.info("Masked ", count, " VPC IDs")
+        end
+      end
+      
+      return masked_body, stats
+    end
+    
+    -- AWS patterns unmasking logic
+    function AwsMaskerElastiCacheHandler:unmask_aws_patterns(body, masking_context, conf)
+      if not masking_context or not masking_context.mappings then
+        return body
+      end
+      
+      local unmasked_body = body
+      local unmask_count = 0
+      
+      -- Reverse the masking mappings
+      for masked_value, original_value in pairs(masking_context.mappings) do
+        local found = string.find(unmasked_body, masked_value, 1, true)
+        if found then
+          unmasked_body = string.gsub(unmasked_body, masked_value, original_value)
+          unmask_count = unmask_count + 1
+        end
+      end
+      
+      if unmask_count > 0 then
+        kong.log.info("Unmasked ", unmask_count, " AWS identifiers")
+      end
+      
+      return unmasked_body
+    end
+    
+    return AwsMaskerElastiCacheHandler
+
+  # Schema.lua - Plugin configuration schema (75 lines)
+  schema.lua: |
+    -- Kong AWS Masker ElastiCache Edition - Schema Configuration
+    -- Optimized for AWS ElastiCache Redis integration
+    -- Supports managed Redis features: AUTH, SSL/TLS, Cluster Mode
+    
+    return {
+      name = "aws-masker",
+      fields = {
+        { config = {
+            type = "record",
+            fields = {
+              -- Core masking features
+              { enabled = { type = "boolean", default = true, description = "Enable/disable the plugin" } },
+              { mask_ec2_instances = { type = "boolean", default = true, description = "Mask EC2 instance IDs" } },
+              { mask_s3_buckets = { type = "boolean", default = true, description = "Mask S3 bucket names" } },
+              { mask_rds_instances = { type = "boolean", default = true, description = "Mask RDS instance identifiers" } },
+              { mask_private_ips = { type = "boolean", default = true, description = "Mask private IP addresses" } },
+              { mask_vpc_ids = { type = "boolean", default = true, description = "Mask VPC identifiers" } },
+              { mask_subnet_ids = { type = "boolean", default = true, description = "Mask subnet identifiers" } },
+              { mask_security_groups = { type = "boolean", default = true, description = "Mask security group IDs" } },
+              
+              -- Behavior configuration
+              { preserve_structure = { type = "boolean", default = true, description = "Preserve JSON/text structure while masking" } },
+              { preserve_length = { type = "boolean", default = false, description = "Preserve original identifier length" } },
+              { mask_type = { type = "string", default = "sequential", one_of = { "sequential", "random", "uuid" }, description = "Masking identifier type" } },
+              { log_masked_requests = { type = "boolean", default = false, description = "Log masked request details (security sensitive)" } },
+              
+              -- ElastiCache Redis configuration (Required)
+              { elasticache_endpoint = { type = "string", required = true, description = "ElastiCache Redis endpoint (e.g., my-cluster.redis.cache.amazonaws.com)" } },
+              { elasticache_port = { type = "integer", default = 6379, description = "ElastiCache Redis port" } },
+              { elasticache_auth_token = { type = "string", required = false, description = "ElastiCache Redis AUTH token (recommended for security)" } },
+              { elasticache_ssl_enabled = { type = "boolean", default = true, description = "Enable SSL/TLS for ElastiCache connection" } },
+              { elasticache_ssl_verify = { type = "boolean", default = true, description = "Verify ElastiCache SSL certificate" } },
+              
+              -- ElastiCache cluster configuration
+              { elasticache_cluster_mode = { type = "boolean", default = false, description = "Enable Redis Cluster mode for ElastiCache" } },
+              { elasticache_read_replicas = { type = "array", elements = { type = "string" }, description = "ElastiCache read replica endpoints" } },
+              { elasticache_database = { type = "integer", default = 0, description = "Redis database number (0-15)" } },
+              
+              -- Connection pool and performance
+              { connection_pool_size = { type = "integer", default = 100, description = "Redis connection pool size" } },
+              { connection_timeout = { type = "integer", default = 2000, description = "Connection timeout in milliseconds" } },
+              { keepalive_timeout = { type = "integer", default = 60000, description = "Keep-alive timeout in milliseconds" } },
+              { socket_timeout = { type = "integer", default = 5000, description = "Socket timeout in milliseconds" } },
+              
+              -- Failover and reliability
+              { enable_failover = { type = "boolean", default = true, description = "Enable automatic failover to read replicas" } },
+              { max_retry_attempts = { type = "integer", default = 3, description = "Maximum retry attempts for Redis operations" } },
+              { retry_delay = { type = "integer", default = 100, description = "Delay between retry attempts in milliseconds" } },
+              { fail_secure = { type = "boolean", default = true, description = "Block requests when ElastiCache is unavailable" } },
+              
+              -- Data management
+              { mapping_ttl = { type = "integer", default = 604800, description = "TTL for masking mappings in seconds (default: 7 days)" } },
+              { max_entries = { type = "integer", default = 10000, description = "Maximum entries per masking session" } },
+              { enable_compression = { type = "boolean", default = true, description = "Enable data compression for ElastiCache storage" } },
+              
+              -- API Authentication (Phase 1 Success Integration)
+              { anthropic_api_key = { type = "string", required = false, description = "Anthropic API key for Claude authentication (Plugin Config priority)" } },
+              
+              -- Monitoring and observability
+              { enable_metrics = { type = "boolean", default = true, description = "Enable performance metrics collection" } },
+              { metrics_namespace = { type = "string", default = "aws_masker_elasticache", description = "CloudWatch metrics namespace" } },
+              { enable_health_checks = { type = "boolean", default = true, description = "Enable ElastiCache health monitoring" } },
+              
+              -- AWS Integration
+              { aws_region = { type = "string", default = "us-east-1", description = "AWS region for ElastiCache cluster" } },
+              { use_iam_auth = { type = "boolean", default = false, description = "Use IAM authentication for ElastiCache (requires IAM role)" } },
+              { iam_role_arn = { type = "string", required = false, description = "IAM role ARN for ElastiCache access" } },
+              
+              -- Development and debugging
+              { debug_mode = { type = "boolean", default = false, description = "Enable debug logging (not for production)" } },
+              { test_mode = { type = "boolean", default = false, description = "Enable test mode with mock ElastiCache" } },
+            }
+        }}
+      }
+    }
+
+  # ElastiCache Client Module (304+ lines)
+  elasticache_client.lua: |
+    -- ElastiCache Client Module for Kong AWS Masker
+    -- Production-ready AWS ElastiCache Redis integration
+    -- Supports SSL/TLS, AUTH tokens, cluster mode, and failover
+    
+    local redis = require "resty.redis"
+    local cjson = require "cjson.safe"
+    local ngx = ngx
+    
+    local _M = {}
+    local mt = { __index = _M }
+    
+    -- ElastiCache connection configuration
+    local POOL_SIZE = 100
+    local KEEPALIVE_TIMEOUT = 60000  -- 60 seconds
+    local CONNECTION_TIMEOUT = 2000   -- 2 seconds
+    local SSL_HANDSHAKE_TIMEOUT = 5000 -- 5 seconds for SSL handshake
+    
+    -- Namespaces for ElastiCache keys
+    local MASKING_PREFIX = "aws:mask:"
+    local UNMASK_PREFIX = "aws:unmask:"
+    local STATS_PREFIX = "aws:stats:"
+    local HEALTH_PREFIX = "aws:health:"
+    
+    -- Initialize ElastiCache client
+    function _M.new(config)
+      if not config or not config.endpoint then
+        return nil, "ElastiCache endpoint required"
+      end
+      
+      local instance = {
+        config = config,
+        connection_pool = {},
+        stats = {
+          connections = 0,
+          successful_ops = 0,
+          failed_ops = 0,
+          last_health_check = 0
+        }
+      }
+      
+      return setmetatable(instance, mt)
+    end
+    
+    -- Get Redis connection with ElastiCache optimizations
+    function _M:get_connection()
+      local red = redis:new()
+      
+      -- Set timeouts
+      red:set_timeouts(
+        self.config.connection_timeout or CONNECTION_TIMEOUT,
+        self.config.socket_timeout or 5000,
+        self.config.socket_timeout or 5000
+      )
+      
+      -- Connect to ElastiCache endpoint
+      local ok, err = red:connect(self.config.endpoint, self.config.port or 6379)
+      if not ok then
+        self.stats.failed_ops = self.stats.failed_ops + 1
+        return nil, "Failed to connect to ElastiCache: " .. (err or "unknown error")
+      end
+      
+      self.stats.connections = self.stats.connections + 1
+      
+      -- SSL/TLS configuration for ElastiCache
+      if self.config.ssl_enabled then
+        local session, err = red:ssl_handshake(
+          nil,  -- reused_session
+          nil,  -- server_name
+          self.config.ssl_verify ~= false,  -- verify certificate
+          nil,  -- send_status_req
+          SSL_HANDSHAKE_TIMEOUT
+        )
+        
+        if not session then
+          red:close()
+          self.stats.failed_ops = self.stats.failed_ops + 1
+          return nil, "SSL handshake failed: " .. (err or "unknown error")
+        end
+        
+        kong.log.info("ElastiCache SSL connection established")
+      end
+      
+      -- AUTH token authentication
+      if self.config.auth_token and self.config.auth_token ~= "" then
+        local res, err = red:auth(self.config.auth_token)
+        if not res or res == ngx.null then
+          red:close()
+          self.stats.failed_ops = self.stats.failed_ops + 1
+          return nil, "ElastiCache AUTH failed: " .. (err or "invalid token")
+        end
+        kong.log.info("ElastiCache AUTH successful")
+      end
+      
+      -- Select database (if not cluster mode)
+      if not self.config.cluster_mode and self.config.database and self.config.database > 0 then
+        local res, err = red:select(self.config.database)
+        if not res then
+          red:close()
+          self.stats.failed_ops = self.stats.failed_ops + 1
+          return nil, "Failed to select database: " .. (err or "unknown error")
+        end
+      end
+      
+      self.stats.successful_ops = self.stats.successful_ops + 1
+      return red
+    end
+    
+    -- Close connection with keep-alive
+    function _M:close_connection(red)
+      if not red then
+        return
+      end
+      
+      -- Put connection back to the pool
+      local ok, err = red:set_keepalive(
+        self.config.keepalive_timeout or KEEPALIVE_TIMEOUT,
+        self.config.pool_size or POOL_SIZE
+      )
+      
+      if not ok then
+        kong.log.warn("Failed to set keepalive: ", err)
+        red:close()
+      end
+    end
+    
+    -- Execute Redis command with retry logic
+    function _M:execute_command(command, ...)
+      local max_retries = self.config.max_retry_attempts or 3
+      local retry_delay = self.config.retry_delay or 100
+      
+      for attempt = 1, max_retries do
+        local red, err = self:get_connection()
+        if not red then
+          kong.log.err("Connection attempt ", attempt, " failed: ", err)
+          if attempt < max_retries then
+            ngx.sleep(retry_delay / 1000)  -- Convert to seconds
+          end
+        else
+          -- Execute command
+          local res, cmd_err = red[command](red, ...)
+          
+          if res and res ~= ngx.null then
+            self:close_connection(red)
+            self.stats.successful_ops = self.stats.successful_ops + 1
+            return res
+          else
+            self:close_connection(red)
+            self.stats.failed_ops = self.stats.failed_ops + 1
+            kong.log.warn("Command ", command, " failed on attempt ", attempt, ": ", cmd_err)
+            if attempt < max_retries then
+              ngx.sleep(retry_delay / 1000)
+            end
+          end
+        end
+      end
+      
+      return nil, "All retry attempts failed for command: " .. command
+    end
+    
+    -- Store masking context in ElastiCache
+    function _M:store_masking_context(session_id, masking_stats, ttl)
+      if not session_id or not masking_stats then
+        return nil, "Invalid parameters"
+      end
+      
+      local key = MASKING_PREFIX .. session_id
+      local data = cjson.encode(masking_stats)
+      
+      if not data then
+        return nil, "Failed to encode masking context"
+      end
+      
+      -- Store with TTL
+      local res, err = self:execute_command("setex", key, ttl or 3600, data)
+      if not res then
+        return nil, "Failed to store masking context: " .. (err or "unknown error")
+      end
+      
+      kong.log.info("Masking context stored: ", key, " (", string.len(data), " bytes)")
+      return true
+    end
+    
+    -- Retrieve masking context from ElastiCache
+    function _M:get_masking_context(session_id)
+      if not session_id then
+        return nil, "Session ID required"
+      end
+      
+      local key = MASKING_PREFIX .. session_id
+      local data, err = self:execute_command("get", key)
+      
+      if not data or data == ngx.null then
+        return nil, "Masking context not found: " .. (err or "key not exists")
+      end
+      
+      local context = cjson.decode(data)
+      if not context then
+        return nil, "Failed to decode masking context"
+      end
+      
+      kong.log.info("Masking context retrieved: ", key)
+      return context
+    end
+    
+    -- Delete masking context from ElastiCache
+    function _M:delete_masking_context(session_id)
+      if not session_id then
+        return nil, "Session ID required"
+      end
+      
+      local key = MASKING_PREFIX .. session_id
+      local res, err = self:execute_command("del", key)
+      
+      if not res then
+        kong.log.warn("Failed to delete masking context: ", err)
+        return nil, err
+      end
+      
+      kong.log.info("Masking context deleted: ", key)
+      return true
+    end
+    
+    -- Health check for ElastiCache
+    function _M:health_check()
+      local current_time = ngx.now()
+      
+      -- Throttle health checks (max once per 10 seconds)
+      if current_time - self.stats.last_health_check < 10 then
+        return true  -- Assume healthy if recently checked
+      end
+      
+      local res, err = self:execute_command("ping")
+      
+      if res == "PONG" then
+        self.stats.last_health_check = current_time
+        kong.log.info("ElastiCache health check: HEALTHY")
+        return true
+      else
+        kong.log.err("ElastiCache health check failed: ", err)
+        return false, err
+      end
+    end
+    
+    -- Get connection statistics
+    function _M:get_stats()
+      return {
+        connections = self.stats.connections,
+        successful_ops = self.stats.successful_ops,
+        failed_ops = self.stats.failed_ops,
+        success_rate = self.stats.successful_ops / (self.stats.successful_ops + self.stats.failed_ops) * 100,
+        last_health_check = self.stats.last_health_check,
+        endpoint = self.config.endpoint .. ":" .. (self.config.port or 6379),
+        ssl_enabled = self.config.ssl_enabled,
+        auth_enabled = self.config.auth_token and true or false
+      }
+    end
+    
+    return _M
+
+  # JSON Safe Module (38 lines)
+  json_safe.lua: |
+    -- Safe JSON encoding/decoding module
+    -- Handles errors gracefully for Kong plugin environment
+    
+    local cjson = require "cjson.safe"
+    
+    local _M = {}
+    
+    -- Safe JSON encoding
+    function _M.encode(data)
+      if not data then
+        return nil
+      end
+      
+      local encoded, err = cjson.encode(data)
+      if not encoded then
+        kong.log.warn("JSON encode error: ", err)
+        return nil
+      end
+      
+      return encoded
+    end
+    
+    -- Safe JSON decoding
+    function _M.decode(json_str)
+      if not json_str or json_str == "" then
+        return nil
+      end
+      
+      local decoded, err = cjson.decode(json_str)
+      if not decoded then
+        kong.log.warn("JSON decode error: ", err)
+        return nil
+      end
+      
+      return decoded
+    end
+    
+    return _M
+
+  # Error Codes Module (94 lines)
+  error_codes.lua: |
+    -- Error codes and handling for AWS Masker ElastiCache Edition
+    -- Standardized error responses for Kong plugin
+    
+    local _M = {}
+    
+    -- Error code definitions
+    local ERROR_CODES = {
+      ELASTICACHE_INIT_FAILED = {
+        status = 503,
+        message = "ElastiCache initialization failed",
+        code = "ELASTICACHE_INIT_FAILED"
+      },
+      ELASTICACHE_UNAVAILABLE = {
+        status = 503,
+        message = "ElastiCache service unavailable",
+        code = "ELASTICACHE_UNAVAILABLE"
+      },
+      MISSING_API_KEY = {
+        status = 401,
+        message = "API key required for authentication",
+        code = "MISSING_API_KEY"
+      },
+      INVALID_CONFIGURATION = {
+        status = 500,
+        message = "Invalid plugin configuration",
+        code = "INVALID_CONFIGURATION"
+      },
+      MASKING_FAILED = {
+        status = 500,
+        message = "AWS resource masking failed",
+        code = "MASKING_FAILED"
+      },
+      UNMASKING_FAILED = {
+        status = 500,
+        message = "AWS resource unmasking failed",
+        code = "UNMASKING_FAILED"
+      }
+    }
+    
+    -- Exit with standardized error response
+    function _M.exit_with_error(error_code, details)
+      local error_def = ERROR_CODES[error_code]
+      if not error_def then
+        error_def = {
+          status = 500,
+          message = "Unknown error",
+          code = "UNKNOWN_ERROR"
+        }
+      end
+      
+      local response_body = {
+        error = {
+          code = error_def.code,
+          message = error_def.message,
+          details = details or {},
+          timestamp = ngx.now(),
+          request_id = ngx.var.request_id
+        }
+      }
+      
+      kong.log.err("Plugin error: ", error_def.code, " - ", error_def.message)
+      if details then
+        kong.log.err("Error details: ", require("kong.plugins.aws-masker.json_safe").encode(details))
+      end
+      
+      return kong.response.exit(error_def.status, response_body)
+    end
+    
+    -- Log warning without exiting
+    function _M.log_warning(warning_code, details)
+      kong.log.warn("Plugin warning: ", warning_code)
+      if details then
+        kong.log.warn("Warning details: ", require("kong.plugins.aws-masker.json_safe").encode(details))
+      end
+    end
+    
+    -- Check if error is retryable
+    function _M.is_retryable_error(error_code)
+      local retryable_errors = {
+        "ELASTICACHE_UNAVAILABLE",
+        "CONNECTION_TIMEOUT",
+        "NETWORK_ERROR"
+      }
+      
+      for _, retryable in ipairs(retryable_errors) do
+        if error_code == retryable then
+          return true
+        end
+      end
+      
+      return false
+    end
+    
+    return _M

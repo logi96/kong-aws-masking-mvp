@@ -1,0 +1,245 @@
+# Fargate-specific Namespace Configuration
+# This namespace is configured specifically for EKS Fargate workloads
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kong-aws-masking
+  labels:
+    name: kong-aws-masking
+    environment: production
+    platform: eks-fargate
+    application: kong-aws-masking-enterprise
+    version: v2.0.0-fargate
+    # Fargate-specific labels
+    compute-type: fargate
+    aws.amazon.com/fargate: "true"
+  annotations:
+    # Fargate annotations
+    eks.amazonaws.com/fargate-profile: kong-aws-masking-profile
+    # Security annotations
+    security.alpha.kubernetes.io/sysctls: "net.core.somaxconn=65535"
+    # Resource management
+    resource-management.alpha.kubernetes.io/fargate: "enabled"
+
+---
+# ResourceQuota for Fargate namespace
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: kong-aws-masking-quota
+  namespace: kong-aws-masking
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+spec:
+  hard:
+    # Pod limits (Fargate-optimized)
+    pods: "20"
+    
+    # CPU resources (Fargate valid combinations)
+    requests.cpu: "4"      # 4 vCPU total allocation
+    limits.cpu: "8"        # 8 vCPU burst capacity
+    
+    # Memory resources (Fargate valid combinations)
+    requests.memory: "8Gi"   # 8GB total allocation
+    limits.memory: "16Gi"    # 16GB burst capacity
+    
+    # Storage (Fargate limitations)
+    persistentvolumeclaims: "0"  # No persistent storage in Fargate
+    
+    # Services and networking
+    services: "10"
+    services.loadbalancers: "2"
+    services.nodeports: "0"  # No NodePort in Fargate
+    
+    # Secrets and ConfigMaps
+    secrets: "20"
+    configmaps: "20"
+
+---
+# NetworkPolicy for Fargate namespace security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kong-aws-masking-network-policy
+  namespace: kong-aws-masking
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+spec:
+  podSelector: {}  # Apply to all pods in namespace
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  # Ingress rules
+  ingress:
+  # Allow traffic from ALB/NLB (AWS Load Balancer Controller)
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: TCP
+      port: 8082  # Nginx proxy
+    - protocol: TCP
+      port: 8000  # Kong proxy
+  
+  # Allow intra-namespace communication
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: kong-aws-masking
+    ports:
+    - protocol: TCP
+      port: 8000  # Kong proxy
+    - protocol: TCP
+      port: 8001  # Kong admin
+    - protocol: TCP
+      port: 8100  # Kong status
+    - protocol: TCP
+      port: 8082  # Nginx proxy
+    - protocol: TCP
+      port: 3000  # Backend API
+  
+  # Egress rules
+  egress:
+  # Allow DNS resolution
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  
+  # Allow HTTPS to external services
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443  # Claude API, AWS services
+  
+  # Allow ElastiCache connection
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 6379  # Redis/ElastiCache
+    - protocol: TCP
+      port: 4510  # LocalStack Redis
+  
+  # Allow intra-namespace communication
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kong-aws-masking
+
+---
+# LimitRange for Fargate resource constraints
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: kong-aws-masking-limits
+  namespace: kong-aws-masking
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+spec:
+  limits:
+  # Container limits (Fargate requirements)
+  - type: Container
+    default:
+      # Default limits for containers
+      cpu: "500m"
+      memory: "1Gi"
+    defaultRequest:
+      # Default requests for containers
+      cpu: "250m"
+      memory: "512Mi"
+    min:
+      # Minimum resources (Fargate minimums)
+      cpu: "250m"   # 0.25 vCPU minimum
+      memory: "512Mi"  # 0.5GB minimum
+    max:
+      # Maximum resources per container
+      cpu: "2"      # 2 vCPU maximum per container
+      memory: "4Gi" # 4GB maximum per container
+  
+  # Pod limits (Fargate specifications)
+  - type: Pod
+    min:
+      # Minimum pod resources
+      cpu: "250m"
+      memory: "512Mi"
+    max:
+      # Maximum pod resources (Fargate limits)
+      cpu: "4"      # 4 vCPU maximum per pod
+      memory: "30Gi" # 30GB maximum per pod
+
+---
+# PodDisruptionBudget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kong-aws-masking-pdb
+  namespace: kong-aws-masking
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: kong-aws-masking-enterprise
+
+---
+# Service Account for Fargate pods
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kong-aws-masking-fargate
+  namespace: kong-aws-masking
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+  annotations:
+    # IRSA (IAM Roles for Service Accounts) annotation placeholder
+    # eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/kong-aws-masking-fargate-role
+automountServiceAccountToken: true
+
+---
+# RBAC ClusterRole for Fargate workloads
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kong-aws-masking-fargate-role
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RBAC ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kong-aws-masking-fargate-binding
+  labels:
+    application: kong-aws-masking-enterprise
+    platform: eks-fargate
+subjects:
+- kind: ServiceAccount
+  name: kong-aws-masking-fargate
+  namespace: kong-aws-masking
+roleRef:
+  kind: ClusterRole
+  name: kong-aws-masking-fargate-role
+  apiGroup: rbac.authorization.k8s.io

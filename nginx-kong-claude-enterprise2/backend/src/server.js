@@ -7,6 +7,7 @@ require('dotenv').config();
 const app = require('./app');
 const logger = require('./utils/logger');
 const { startHealthChecks } = require('./services/health/healthCheckService');
+const maskingEventSubscriber = require('./services/redis/maskingEventSubscriber');
 
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
@@ -14,13 +15,23 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 /**
  * Start the server
  */
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   logger.info(`Server running in ${NODE_ENV} mode on port ${PORT}`);
   logger.info(`Health check endpoint: http://localhost:${PORT}/health`);
   
   // Start background health checks
   if (process.env.ENABLE_MONITORING === 'true') {
     startHealthChecks();
+  }
+  
+  // Start Kong masking event subscription (실시간 마스킹 검증)
+  if (process.env.ENABLE_KONG_EVENTS === 'true') {
+    try {
+      await maskingEventSubscriber.startSubscription();
+      logger.info('🎯 Kong masking event subscription started successfully');
+    } catch (error) {
+      logger.error('Failed to start Kong masking event subscription:', error);
+    }
   }
 });
 
@@ -30,8 +41,16 @@ const server = app.listen(PORT, () => {
 const gracefulShutdown = () => {
   logger.info('Received shutdown signal, starting graceful shutdown...');
   
-  server.close(() => {
+  server.close(async () => {
     logger.info('HTTP server closed');
+    
+    // Stop Kong masking event subscription
+    try {
+      await maskingEventSubscriber.stopSubscription();
+      logger.info('Kong masking event subscription stopped');
+    } catch (error) {
+      logger.error('Error stopping Kong masking event subscription:', error);
+    }
     
     // Close Redis connections
     const redisService = require('./services/redis/redisService');

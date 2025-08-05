@@ -1,0 +1,24 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: claude-api-service
+    url: https://api.anthropic.com
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+
+routes:
+  - name: claude-proxy-route
+    service: claude-api-service
+    paths:
+      - /v1
+
+plugins:
+  - name: aws-masker
+    route: claude-proxy-route
+    config:
+      anthropic_api_key: "test-api-key"
+      mask_ec2_instances: true
+      redis_host: "redis"
+      redis_port: 6379

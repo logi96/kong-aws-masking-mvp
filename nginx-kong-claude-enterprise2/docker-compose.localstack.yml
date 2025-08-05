@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # LocalStack - AWS 서비스 에뮬레이션
+  localstack:
+    image: localstack/localstack:3.0
+    container_name: localstack-ecs-test
+    ports:
+      - "4566:4566"      # LocalStack main port
+      - "4570-4580:4570-4580"  # ElastiCache ports range
+    environment:
+      # LocalStack 기본 설정
+      - SERVICES=ecs,elasticache,ec2,iam,logs
+      - DEBUG=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - PERSISTENCE=1
+      - DATA_DIR=/tmp/localstack/data
+      
+      # ECS 설정
+      - ECS_ENDPOINT_STRATEGY=port
+      - ECS_DOCKER_FLAGS=-e LOCALSTACK_HOSTNAME=localstack
+      
+      # ElastiCache 설정
+      - ELASTICACHE_ENDPOINT_STRATEGY=port
+      
+      # AWS 기본 설정
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      
+      # 개발 편의성
+      - SKIP_INFRA_DOWNLOADS=0
+      - LEGACY_DIRECTORIES=1
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+      - "./localstack-data:/tmp/localstack/data"
+    networks:
+      - localstack-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Redis CLI for testing
+  redis-client:
+    image: redis:7.0-alpine
+    container_name: redis-client-test
+    depends_on:
+      - localstack
+    networks:
+      - localstack-network
+    command: ["sleep", "3600"]  # Keep container running for manual testing
+
+networks:
+  localstack-network:
+    driver: bridge
+
+volumes:
+  localstack-data:

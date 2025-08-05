@@ -1,0 +1,121 @@
+{
+    "family": "kong-aws-masker-elasticache",
+    "networkMode": "awsvpc",
+    "requiresCompatibilities": ["FARGATE"],
+    "cpu": "512",
+    "memory": "1024",
+    "executionRoleArn": "arn:aws:iam::000000000000:role/ecsTaskExecutionRole",
+    "taskRoleArn": "arn:aws:iam::000000000000:role/ecsTaskRole",
+    "containerDefinitions": [
+        {
+            "name": "kong-gateway",
+            "image": "kong:3.9-ubuntu",
+            "essential": true,
+            "portMappings": [
+                {
+                    "containerPort": 8000,
+                    "protocol": "tcp",
+                    "name": "proxy"
+                },
+                {
+                    "containerPort": 8001,
+                    "protocol": "tcp",
+                    "name": "admin"
+                },
+                {
+                    "containerPort": 8100,
+                    "protocol": "tcp",
+                    "name": "status"
+                }
+            ],
+            "environment": [
+                {
+                    "name": "KONG_DATABASE",
+                    "value": "off"
+                },
+                {
+                    "name": "KONG_PROXY_LISTEN",
+                    "value": "0.0.0.0:8000"
+                },
+                {
+                    "name": "KONG_ADMIN_LISTEN",
+                    "value": "0.0.0.0:8001"
+                },
+                {
+                    "name": "KONG_STATUS_LISTEN",
+                    "value": "0.0.0.0:8100"
+                },
+                {
+                    "name": "KONG_LOG_LEVEL",
+                    "value": "info"
+                },
+                {
+                    "name": "KONG_PLUGINS",
+                    "value": "bundled"
+                },
+                {
+                    "name": "ELASTICACHE_ENDPOINT",
+                    "value": "localhost.localstack.cloud"
+                },
+                {
+                    "name": "ELASTICACHE_PORT",
+                    "value": "4510"
+                },
+                {
+                    "name": "ELASTICACHE_SSL_ENABLED",
+                    "value": "false"
+                },
+                {
+                    "name": "ELASTICACHE_DATABASE",
+                    "value": "0"
+                },
+                {
+                    "name": "AWS_REGION",
+                    "value": "us-east-1"
+                }
+            ],
+            "secrets": [
+                {
+                    "name": "ANTHROPIC_API_KEY",
+                    "valueFrom": "arn:aws:ssm:us-east-1:000000000000:parameter/kong/anthropic-api-key"
+                }
+            ],
+            "mountPoints": [],
+            "logConfiguration": {
+                "logDriver": "awslogs",
+                "options": {
+                    "awslogs-group": "/ecs/kong-aws-masker-elasticache",
+                    "awslogs-region": "us-east-1",
+                    "awslogs-stream-prefix": "kong",
+                    "awslogs-create-group": "true"
+                }
+            },
+            "healthCheck": {
+                "command": [
+                    "CMD-SHELL",
+                    "curl -f http://localhost:8100/status || exit 1"
+                ],
+                "interval": 30,
+                "timeout": 10,
+                "retries": 3,
+                "startPeriod": 60
+            }
+        }
+    ],
+    "volumes": [],
+    "placementConstraints": [],
+    "tags": [
+        {
+            "key": "Environment",
+            "value": "Development"
+        },
+        {
+            "key": "Service",
+            "value": "Kong-AWS-Masker"
+        },
+        {
+            "key": "Version",
+            "value": "2.0.0-elasticache-ecs"
+        }
+    ]
+}

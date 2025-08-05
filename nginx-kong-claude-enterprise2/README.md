@@ -37,6 +37,31 @@ Kong AWS Masker is an enterprise-grade API Gateway solution that provides secure
 
 ## Quick Start
 
+### 🚀 **EC2 자동 설치 (권장)**
+
+**Phase 1 성공 버전**으로 완전 검증된 자동 설치 스크립트를 사용하세요:
+
+📋 **[EC2 설치 가이드](./USER_DATA_INSTALLATION_GUIDE.md)** - `user_data_full.sh` 완전 사용 매뉴얼
+
+```bash
+# Terraform 예시
+resource "aws_instance" "kong_enterprise" {
+  ami           = "ami-0abcdef1234567890"
+  instance_type = "t3.medium"
+  
+  user_data = templatefile("${path.module}/user_data_full.sh", {
+    environment        = "production"
+    anthropic_api_key  = var.anthropic_api_key
+    redis_password     = var.redis_password
+    kong_admin_token   = var.kong_admin_token
+  })
+}
+```
+
+**설치 시간**: 8-12분 완전 자동화 🎉
+
+### 🐳 **로컬 Docker 설치**
+
 ### Prerequisites
 
 - Docker & Docker Compose (v3.8+)
@@ -49,7 +74,7 @@ Kong AWS Masker is an enterprise-grade API Gateway solution that provides secure
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd nginx-kong-claude-enterprise2
+   cd $(basename $PWD)
    ```
 
 2. **Configure environment**
@@ -158,7 +183,7 @@ The system automatically masks these AWS resource types:
 ### Project Structure
 
 ```
-nginx-kong-claude-enterprise2/
+[project-name]/
 ├── backend/              # Node.js backend API
 │   ├── src/             # Source code
 │   ├── tests/           # Backend tests

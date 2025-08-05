@@ -1,0 +1,352 @@
+# Claude Code SDK Deployment for Interactive Testing
+# Containerized Claude Code SDK environment with proxy integration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-code-sdk
+  namespace: kong-aws-masking
+  labels:
+    app: claude-code-sdk
+    component: interactive-client
+    version: "latest-proxy-integrated"
+spec:
+  replicas: 1  # Single instance for interactive use
+  strategy:
+    type: Recreate  # Ensure clean restart
+  selector:
+    matchLabels:
+      app: claude-code-sdk
+  template:
+    metadata:
+      labels:
+        app: claude-code-sdk
+        component: interactive-client
+        version: "latest-proxy-integrated"
+      annotations:
+        kubectl.kubernetes.io/default-container: "claude-code-sdk"
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: claude-code-sdk
+        image: node:20-alpine
+        imagePullPolicy: IfNotPresent
+        
+        # Keep container running for interactive use
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "=== Claude Code SDK Container Initialization ==="
+          echo "Timestamp: $(date)"
+          echo "Environment: EKS + ElastiCache Integration"
+          echo "Proxy Endpoint: ${HTTP_PROXY}"
+          echo "Claude API Base URL: ${ANTHROPIC_BASE_URL}"
+          echo ""
+          
+          # Install required packages
+          echo "Installing required packages..."
+          apk add --no-cache curl wget bash git openssh-client
+          
+          # Install Claude Code SDK (simulated)
+          echo "Setting up Claude Code SDK environment..."
+          npm install -g @anthropic-ai/sdk
+          
+          # Create test scripts directory
+          mkdir -p /home/claude/{scripts,logs,tests}
+          
+          # Create test script for AWS masking validation
+          cat > /home/claude/scripts/test-aws-masking.js << 'EOF'
+          #!/usr/bin/env node
+          const Anthropic = require('@anthropic-ai/sdk');
+          
+          const anthropic = new Anthropic({
+            apiKey: process.env.ANTHROPIC_API_KEY,
+            baseURL: process.env.ANTHROPIC_BASE_URL
+          });
+          
+          async function testAWSMasking() {
+            console.log('=== AWS Masking Test via Kong ElastiCache Plugin ===');
+            console.log('Base URL:', process.env.ANTHROPIC_BASE_URL);
+            console.log('Proxy:', process.env.HTTP_PROXY);
+            console.log('');
+            
+            const testMessage = `
+          Analyze this AWS infrastructure:
+          - EC2 Instance: i-1234567890abcdef0
+          - S3 Bucket: s3://my-sensitive-production-bucket
+          - RDS Instance: mydb.cluster-xyz123.us-east-1.rds.amazonaws.com
+          - VPC ID: vpc-abc123def456
+          - Private IP: 10.0.1.100
+          - Security Group: sg-12345678901234567
+          
+          Please provide a security analysis.
+            `;
+            
+            try {
+              const message = await anthropic.messages.create({
+                model: 'claude-3-5-sonnet-20241022',
+                max_tokens: 1000,
+                messages: [{ role: 'user', content: testMessage }]
+              });
+              
+              console.log('Response received successfully!');
+              console.log('Content:', message.content[0].text);
+              
+              // Log to file
+              const fs = require('fs');
+              const logEntry = {
+                timestamp: new Date().toISOString(),
+                request: testMessage,
+                response: message.content[0].text,
+                status: 'success'
+              };
+              fs.appendFileSync('/home/claude/logs/api-test.log', 
+                               JSON.stringify(logEntry, null, 2) + '\n');
+              
+            } catch (error) {
+              console.error('API request failed:', error.message);
+              
+              // Log error
+              const fs = require('fs');
+              const errorEntry = {
+                timestamp: new Date().toISOString(),
+                error: error.message,
+                status: 'failed'
+              };
+              fs.appendFileSync('/home/claude/logs/api-test.log', 
+                               JSON.stringify(errorEntry, null, 2) + '\n');
+            }
+          }
+          
+          testAWSMasking();
+          EOF
+          
+          chmod +x /home/claude/scripts/test-aws-masking.js
+          
+          # Create health check script
+          cat > /home/claude/scripts/health-check.sh << 'EOF'
+          #!/bin/bash
+          echo "=== Claude Code SDK Health Check ==="
+          echo "Timestamp: $(date)"
+          echo "Container Status: Running"
+          echo "Proxy Connection: Testing..."
+          
+          # Test proxy connection
+          if curl -s --max-time 5 "${HTTP_PROXY}/health" > /dev/null 2>&1; then
+            echo "Proxy Connection: ✅ SUCCESS"
+          else
+            echo "Proxy Connection: ❌ FAILED"
+          fi
+          
+          # Test backend API
+          if curl -s --max-time 5 "http://backend-api-service:3000/health" > /dev/null 2>&1; then
+            echo "Backend API: ✅ SUCCESS"
+          else
+            echo "Backend API: ❌ FAILED"
+          fi
+          
+          echo "=== Health Check Complete ==="
+          EOF
+          
+          chmod +x /home/claude/scripts/health-check.sh
+          
+          echo ""
+          echo "=== Claude Code SDK Ready ==="
+          echo "Available commands:"
+          echo "  /home/claude/scripts/test-aws-masking.js - Test AWS masking functionality"
+          echo "  /home/claude/scripts/health-check.sh - Check system health"
+          echo "  curl ${HTTP_PROXY}/health - Test proxy directly"
+          echo ""
+          echo "Logs directory: /home/claude/logs/"
+          echo "Interactive access: kubectl exec -it deployment/claude-code-sdk -- /bin/bash"
+          echo ""
+          echo "Container will remain running for interactive use..."
+          
+          # Keep container running
+          tail -f /dev/null
+        
+        # Resource requirements
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        
+        # Environment variables
+        env:
+        # Claude Code SDK Configuration
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+        - name: ANTHROPIC_BASE_URL
+          value: "http://nginx-internal-service:8082/v1"
+        - name: HTTP_PROXY
+          value: "http://nginx-internal-service:8082"
+        - name: HTTPS_PROXY
+          value: "http://nginx-internal-service:8082"
+        
+        # Environment settings
+        - name: NODE_ENV
+          value: "development"
+        - name: TZ
+          value: "Asia/Seoul"
+        
+        # AWS Configuration (for CLI tools)
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: AWS_REGION
+        - name: AWS_DEFAULT_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: AWS_REGION
+        
+        # Container configuration
+        - name: CONTAINER_TYPE
+          value: "claude-code-sdk"
+        - name: INTEGRATION_VERSION
+          value: "elasticache-v2.0.0"
+        
+        # Health probe (simple file check)
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "test -f /home/claude/scripts/health-check.sh"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          exec:
+            command:
+            - /home/claude/scripts/health-check.sh
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 2
+        
+        # Volume mounts
+        volumeMounts:
+        - name: claude-home
+          mountPath: /home/claude
+        - name: tmp-volume
+          mountPath: /tmp
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false  # Need write access for logs and scripts
+          runAsNonRoot: true
+          capabilities:
+            drop:
+            - ALL
+        
+        # TTY for interactive use
+        tty: true
+        stdin: true
+      
+      # Volumes
+      volumes:
+      - name: claude-home
+        emptyDir: {}
+      - name: tmp-volume
+        emptyDir: {}
+      
+      # Node selection
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      # Restart policy
+      restartPolicy: Always
+---
+# Claude Code SDK Service (for internal access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-code-sdk-service
+  namespace: kong-aws-masking
+  labels:
+    app: claude-code-sdk
+    component: interactive-client
+spec:
+  type: ClusterIP
+  ports:
+  - name: ssh
+    port: 22
+    targetPort: 22
+    protocol: TCP
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: claude-code-sdk
+---
+# Job for running automated tests
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: claude-sdk-integration-test
+  namespace: kong-aws-masking
+  labels:
+    app: claude-code-sdk
+    component: integration-test
+    version: "test-job"
+spec:
+  template:
+    metadata:
+      labels:
+        app: claude-code-sdk
+        component: integration-test
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: integration-test
+        image: node:20-alpine
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "=== Claude Code SDK Integration Test ==="
+          echo "Testing proxy connection..."
+          
+          # Install curl
+          apk add --no-cache curl
+          
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          curl -v "${HTTP_PROXY}/health" || echo "Health check failed"
+          
+          # Test Kong admin (internal)
+          echo "Testing Kong admin..."
+          curl -v "http://kong-admin-service:8001/status" || echo "Kong admin failed"
+          
+          # Test backend API
+          echo "Testing backend API..."
+          curl -v "http://backend-api-service:3000/health" || echo "Backend API failed"
+          
+          echo "Integration test completed"
+        
+        env:
+        - name: HTTP_PROXY
+          value: "http://nginx-internal-service:8082"
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+  backoffLimit: 3

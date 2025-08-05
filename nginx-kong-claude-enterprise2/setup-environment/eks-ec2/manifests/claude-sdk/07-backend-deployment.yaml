@@ -1,0 +1,253 @@
+# Backend API Deployment for Kong AWS Masking Enterprise
+# Node.js backend service with AWS CLI integration
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-api
+  namespace: kong-aws-masking
+  labels:
+    app: backend-api
+    component: api-service
+    version: "enterprise-v2.0.0"
+spec:
+  replicas: 2  # High availability
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: backend-api
+  template:
+    metadata:
+      labels:
+        app: backend-api
+        component: api-service
+        version: "enterprise-v2.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      
+      containers:
+      - name: backend-api
+        image: node:20-alpine
+        imagePullPolicy: IfNotPresent
+        
+        # Working directory and command
+        workingDir: /app
+        command: ["/bin/sh"]
+        args:
+        - -c
+        - |
+          echo "Installing dependencies..."
+          npm install
+          echo "Starting backend API server..."
+          npm start
+        
+        # Resource requirements
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "1Gi"
+            cpu: "1"
+        
+        # Environment variables
+        env:
+        # Node.js settings
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: TZ
+          value: "Asia/Seoul"
+        
+        # API Configuration
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+        - name: ANTHROPIC_BASE_URL
+          value: "http://nginx-internal-service:8082/v1"
+        - name: HTTP_PROXY
+          value: "http://nginx-internal-service:8082"
+        
+        # AWS Configuration
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: AWS_REGION
+        - name: AWS_DEFAULT_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: AWS_REGION
+        
+        # ElastiCache Configuration
+        - name: ELASTICACHE_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_ENDPOINT
+        - name: ELASTICACHE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_PORT
+        
+        # Performance settings
+        - name: UV_THREADPOOL_SIZE
+          value: "4"
+        - name: NODE_OPTIONS
+          value: "--max-old-space-size=768"
+        
+        # Health and readiness probes
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        
+        # Startup probe for slow startup
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 10
+        
+        # Ports
+        ports:
+        - name: http
+          containerPort: 3000
+          protocol: TCP
+        
+        # Volume mounts
+        volumeMounts:
+        - name: backend-source
+          mountPath: /app
+          readOnly: true
+        - name: backend-logs
+          mountPath: /app/logs
+        - name: tmp-volume
+          mountPath: /tmp
+        
+        # Security context
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop:
+            - ALL
+      
+      # Volumes
+      volumes:
+      - name: backend-source
+        configMap:
+          name: backend-source-code
+      - name: backend-logs
+        emptyDir: {}
+      - name: tmp-volume
+        emptyDir: {}
+      
+      # Node selection and affinity
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - backend-api
+              topologyKey: kubernetes.io/hostname
+---
+# Backend API Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-api-service
+  namespace: kong-aws-masking
+  labels:
+    app: backend-api
+    component: api-service
+spec:
+  type: ClusterIP
+  ports:
+  - name: http
+    port: 3000
+    targetPort: 3000
+    protocol: TCP
+  selector:
+    app: backend-api
+---
+# Backend API Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend-api-hpa
+  namespace: kong-aws-masking
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend-api
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60

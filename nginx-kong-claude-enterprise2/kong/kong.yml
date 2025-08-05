@@ -3,11 +3,10 @@ _transform: true
 
 services:
   - name: claude-api-service
-    url: https://api.anthropic.com/v1/messages
+    url: https://api.anthropic.com
     protocol: https
     host: api.anthropic.com
     port: 443
-    path: /v1/messages
     retries: 3
     connect_timeout: 5000
     write_timeout: 60000
@@ -20,10 +19,11 @@ routes:
   - name: claude-proxy-route
     service: claude-api-service
     paths:
-      - /claude-proxy/v1/messages
-      - /v1/messages
+      - /v1
     methods:
+      - GET
       - POST
+      - OPTIONS
     strip_path: false
     preserve_host: false
     regex_priority: 0
@@ -35,55 +35,32 @@ plugins:
   - name: aws-masker
     route: claude-proxy-route
     config:
-      # Redis configuration
-      use_redis: true
-      redis_host: redis
-      redis_port: 6379
-      redis_password: "${REDIS_PASSWORD}"
-      redis_database: 0
-      redis_timeout: 2000
-      redis_keepalive_timeout: 60000
-      redis_keepalive_pool_size: 30
-      
-      # Masking features
+      # Basic masking features (from schema.lua)
       mask_ec2_instances: true
       mask_s3_buckets: true
       mask_rds_instances: true
-      mask_elasticache_clusters: true
-      mask_eks_clusters: true
-      mask_lambda_functions: true
-      mask_vpc_ids: true
-      mask_subnet_ids: true
-      mask_security_groups: true
       mask_private_ips: true
-      mask_iam_roles: true
-      mask_iam_users: true
-      mask_kms_keys: true
-      mask_sns_topics: true
-      mask_sqs_queues: true
-      mask_dynamodb_tables: true
-      mask_efs_filesystems: true
-      mask_elb_names: true
-      mask_cloudfront_distributions: true
-      mask_route53_zones: true
       
-      # Advanced options
+      # Behavior configuration
       preserve_structure: true
       log_masked_requests: true
-      log_level: info
+      
+      # API Authentication Configuration
+      anthropic_api_key: "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"
+      
+      # Redis storage - traditional mode (ElastiCache fields allowed but unused)
+      use_redis: true
+      redis_type: "traditional"
       mapping_ttl: 86400  # 24 hours
-      max_body_size: 10485760  # 10MB
-      enable_metrics: true
-      enable_health_check: true
+      max_entries: 10000
       
-      # Event publishing
-      publish_events: true
-      event_channel: "aws-masking-events"
-      
-      # Performance tuning
-      cache_size: 10000
-      batch_size: 100
-      worker_pool_size: 4
+      # ElastiCache fields (allowed for forward compatibility)
+      redis_ssl_enabled: false
+      redis_ssl_verify: false
+      redis_auth_token: null
+      redis_user: null
+      redis_cluster_mode: false
+      redis_cluster_endpoint: null
     tags:
       - security
       - masking
@@ -96,18 +73,6 @@ plugins:
     tags:
       - observability
 
-  - name: request-transformer
-    route: claude-proxy-route
-    config:
-      add:
-        headers:
-          - "anthropic-version:2023-06-01"
-      remove:
-        headers:
-          - "X-Real-IP"
-          - "X-Forwarded-For"
-    tags:
-      - security
 
   - name: response-transformer
     route: claude-proxy-route

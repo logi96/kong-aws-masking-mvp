@@ -1,0 +1,129 @@
+# ElastiCache Redis Configuration for Kong Plugin
+# Contains ElastiCache endpoint and connection settings
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticache-config
+  namespace: kong-aws-masking
+  labels:
+    component: elasticache
+    version: "v2.0.0"
+data:
+  # ElastiCache Redis endpoint (direct ClusterIP to bypass DNS)
+  ELASTICACHE_ENDPOINT: "10.96.167.93"
+  ELASTICACHE_PORT: "4510"
+  ELASTICACHE_SSL_ENABLED: "false"  # LocalStack limitation
+  ELASTICACHE_SSL_VERIFY: "false"
+  ELASTICACHE_CLUSTER_MODE: "false"
+  ELASTICACHE_DATABASE: "0"
+  
+  # Connection settings
+  CONNECTION_POOL_SIZE: "100"
+  CONNECTION_TIMEOUT: "2000"
+  KEEPALIVE_TIMEOUT: "60000"
+  SOCKET_TIMEOUT: "5000"
+  
+  # Failover and reliability
+  ENABLE_FAILOVER: "true"
+  MAX_RETRY_ATTEMPTS: "3"
+  RETRY_DELAY: "100"
+  FAIL_SECURE: "true"
+  
+  # Data management
+  MAPPING_TTL: "604800"  # 7 days
+  MAX_ENTRIES: "10000"
+  ENABLE_COMPRESSION: "true"
+  
+  # AWS Integration
+  AWS_REGION: "ap-northeast-2"
+  USE_IAM_AUTH: "false"
+  
+  # Performance monitoring
+  ENABLE_METRICS: "true"
+  METRICS_NAMESPACE: "aws_masker_elasticache"
+  ENABLE_HEALTH_CHECKS: "true"
+  
+  # Development settings (adjust for production)
+  DEBUG_MODE: "false"
+  TEST_MODE: "false"
+---
+# ElastiCache authentication secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: elasticache-auth
+  namespace: kong-aws-masking
+  labels:
+    component: elasticache
+    version: "v2.0.0"
+type: Opaque
+data:
+  # ElastiCache AUTH token (base64 encoded, empty for LocalStack)
+  auth-token: ""  # To be populated by installation script
+  # IAM role ARN for ElastiCache access (if using IAM auth)
+  iam-role-arn: ""  # To be populated for production
+---
+# Kong Plugin Configuration Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kong-plugin-config
+  namespace: kong-aws-masking
+  labels:
+    component: kong-plugin
+    version: "aws-masker-elasticache-v2.0.0"
+type: Opaque
+data:
+  # Anthropic API key (base64 encoded, from Phase 1 success version)
+  anthropic-api-key: ""  # To be populated by installation script
+stringData:
+  # Plugin configuration template
+  plugin-config: |
+    # AWS Masker ElastiCache Plugin Configuration
+    # This will be injected into Kong declarative config
+    plugins:
+      - name: aws-masker-elasticache
+        config:
+          # ElastiCache Redis settings
+          elasticache_endpoint: "${ELASTICACHE_ENDPOINT}"
+          elasticache_port: ${ELASTICACHE_PORT}
+          elasticache_ssl_enabled: ${ELASTICACHE_SSL_ENABLED}
+          elasticache_ssl_verify: ${ELASTICACHE_SSL_VERIFY}
+          elasticache_cluster_mode: ${ELASTICACHE_CLUSTER_MODE}
+          elasticache_database: ${ELASTICACHE_DATABASE}
+          
+          # AWS masking features
+          mask_ec2_instances: true
+          mask_s3_buckets: true
+          mask_rds_instances: true
+          mask_private_ips: true
+          mask_vpc_ids: true
+          mask_subnet_ids: true
+          mask_security_groups: true
+          
+          # Behavior configuration
+          preserve_structure: true
+          preserve_length: false
+          mask_type: "sequential"
+          log_masked_requests: false
+          
+          # Connection settings
+          connection_timeout: ${CONNECTION_TIMEOUT}
+          keepalive_timeout: ${KEEPALIVE_TIMEOUT}
+          mapping_ttl: ${MAPPING_TTL}
+          
+          # Phase 1 Success Version API key integration
+          anthropic_api_key: "${ANTHROPIC_API_KEY}"
+          
+          # Failover settings
+          enable_failover: ${ENABLE_FAILOVER}
+          max_retry_attempts: ${MAX_RETRY_ATTEMPTS}
+          fail_secure: ${FAIL_SECURE}
+          
+          # Performance settings
+          enable_metrics: ${ENABLE_METRICS}
+          enable_health_checks: ${ENABLE_HEALTH_CHECKS}
+          
+          # Development settings
+          debug_mode: ${DEBUG_MODE}
+          test_mode: ${TEST_MODE}

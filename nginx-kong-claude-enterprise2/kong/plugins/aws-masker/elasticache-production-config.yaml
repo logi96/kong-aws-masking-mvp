@@ -1,0 +1,243 @@
+# Kong AWS-Masker Plugin ElastiCache Production Configuration
+# Day 3 Implementation - SSL/TLS, Authentication, and Cluster Mode
+# 
+# This configuration demonstrates how to set up the aws-masker plugin
+# with AWS ElastiCache for Redis in production environments
+
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: aws-masker-elasticache-production
+  namespace: default
+  annotations:
+    kubernetes.io/ingress.class: kong
+plugin: aws-masker
+config:
+  # ====================================
+  # Core AWS Masking Configuration
+  # ====================================
+  mask_ec2_instances: true
+  mask_s3_buckets: true
+  mask_rds_instances: true
+  mask_private_ips: true
+  preserve_structure: true
+  log_masked_requests: true
+  
+  # ====================================
+  # ElastiCache Connection Configuration
+  # ====================================
+  
+  # Connection Type - CRITICAL: Set to "managed" for ElastiCache
+  redis_type: "managed"  # Options: "traditional" or "managed"
+  
+  # Basic Redis Connection Settings
+  redis_host: "my-cluster.abc123.cache.amazonaws.com"  # ElastiCache endpoint
+  redis_port: 6379  # Standard Redis port (6380 for SSL in some cases)
+  redis_database: 0  # Database number (usually 0 for ElastiCache)
+  
+  # ====================================
+  # SSL/TLS Configuration (REQUIRED for Production)
+  # ====================================
+  redis_ssl_enabled: true   # Enable SSL/TLS encryption
+  redis_ssl_verify: true    # Verify SSL certificates (recommended)
+  
+  # ====================================
+  # ElastiCache Authentication
+  # ====================================
+  
+  # Option 1: Simple Auth Token (ElastiCache AUTH command)
+  redis_auth_token: "${ELASTICACHE_AUTH_TOKEN}"  # Use secret/env variable
+  
+  # Option 2: RBAC Authentication (Redis 6.0+ with username/password)
+  # redis_user: "aws-masker-user"
+  # redis_auth_token: "${ELASTICACHE_USER_PASSWORD}"
+  
+  # ====================================
+  # Cluster Mode Configuration (Optional)
+  # ====================================
+  redis_cluster_mode: false  # Set to true for Redis Cluster mode
+  # redis_cluster_endpoint: "my-cluster.abc123.clustercfg.cache.amazonaws.com"
+  
+  # ====================================
+  # Performance and Storage Configuration
+  # ====================================
+  use_redis: true
+  mapping_ttl: 604800      # 7 days (in seconds)
+  max_entries: 50000       # Increased for production workload
+  
+  # ====================================
+  # Connection Pool Optimization
+  # ====================================
+  redis_timeout: 2000           # 2 seconds connection timeout
+  redis_keepalive_timeout: 120000  # 2 minutes for SSL connections
+  redis_keepalive_pool_size: 30    # Optimized pool size for SSL
+
+---
+# Alternative Configuration: ElastiCache Cluster Mode
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: aws-masker-elasticache-cluster
+  namespace: default
+plugin: aws-masker
+config:
+  # Core masking settings
+  mask_ec2_instances: true
+  mask_s3_buckets: true
+  mask_rds_instances: true
+  mask_private_ips: true
+  preserve_structure: true
+  
+  # ElastiCache Cluster Mode Configuration
+  redis_type: "managed"
+  redis_ssl_enabled: true
+  redis_ssl_verify: true
+  redis_auth_token: "${ELASTICACHE_AUTH_TOKEN}"
+  
+  # Cluster-specific settings
+  redis_cluster_mode: true
+  redis_cluster_endpoint: "my-cluster.abc123.clustercfg.cache.amazonaws.com"
+  redis_port: 6379
+  
+  # Optimized for cluster operations
+  mapping_ttl: 604800
+  max_entries: 100000  # Higher capacity for cluster setup
+
+---
+# Development/Testing Configuration (Non-SSL)
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: aws-masker-elasticache-dev
+  namespace: development
+plugin: aws-masker
+config:
+  # Core masking settings
+  mask_ec2_instances: true
+  mask_s3_buckets: true
+  mask_rds_instances: true
+  mask_private_ips: true
+  preserve_structure: true
+  log_masked_requests: true  # Enable for debugging
+  
+  # ElastiCache Development Configuration
+  redis_type: "managed"
+  redis_host: "dev-cluster.abc123.cache.amazonaws.com"
+  redis_port: 6379
+  
+  # Relaxed SSL settings for development
+  redis_ssl_enabled: false   # Can be disabled in dev environment
+  redis_ssl_verify: false
+  
+  # Simple authentication
+  redis_auth_token: "${DEV_ELASTICACHE_AUTH_TOKEN}"
+  
+  # Reduced capacity for dev
+  mapping_ttl: 86400   # 1 day
+  max_entries: 10000
+
+---
+# Traditional Redis Fallback Configuration
+apiVersion: configuration.konghq.com/v1
+kind: KongPlugin
+metadata:
+  name: aws-masker-traditional-redis
+  namespace: default
+plugin: aws-masker
+config:
+  # Core masking settings
+  mask_ec2_instances: true
+  mask_s3_buckets: true
+  mask_rds_instances: true
+  mask_private_ips: true
+  preserve_structure: true
+  
+  # Traditional Redis Configuration (Backward Compatibility)
+  redis_type: "traditional"  # Default value
+  redis_host: "redis-service"
+  redis_port: 6379
+  redis_password: "${REDIS_PASSWORD}"  # Traditional password auth
+  
+  # Standard Redis settings
+  use_redis: true
+  mapping_ttl: 604800
+  max_entries: 25000
+
+---
+# Environment Variables Configuration Example
+# Set these in your Kubernetes secret or environment
+
+# Required for ElastiCache
+# ELASTICACHE_AUTH_TOKEN: "your-elasticache-auth-token-here"
+# DEV_ELASTICACHE_AUTH_TOKEN: "dev-auth-token"
+# REDIS_PASSWORD: "traditional-redis-password"
+
+# Optional ElastiCache settings
+# ELASTICACHE_CLUSTER_ENDPOINT: "cluster-endpoint.amazonaws.com"
+# ELASTICACHE_USERNAME: "rbac-username"
+
+---
+# Kubernetes Secret Example for ElastiCache Authentication
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-masker-elasticache-secrets
+  namespace: default
+type: Opaque
+stringData:
+  auth-token: "your-production-elasticache-auth-token-here"
+  cluster-endpoint: "prod-cluster.abc123.clustercfg.cache.amazonaws.com"
+  rbac-username: "aws-masker-prod-user"
+
+---
+# Kong Service and Route Configuration Example
+apiVersion: configuration.konghq.com/v1
+kind: KongIngress
+metadata:
+  name: aws-masker-service-config
+route:
+  protocols:
+  - https
+  - http
+  strip_path: false
+  preserve_host: true
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-api-service
+  annotations:
+    konghq.com/plugins: aws-masker-elasticache-production
+spec:
+  ports:
+  - port: 443
+    targetPort: 443
+    protocol: TCP
+    name: https
+  type: ExternalName
+  externalName: api.anthropic.com
+
+---
+# Performance Monitoring ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticache-monitoring-config
+data:
+  performance-targets.yaml: |
+    # ElastiCache Performance Targets for aws-masker plugin
+    connection_latency_target_ms: 2.0
+    ssl_handshake_timeout_ms: 5000
+    connection_pool_size: 30
+    keepalive_timeout_ms: 120000
+    
+    # Monitoring thresholds
+    max_connection_failures: 5
+    health_check_interval_seconds: 30
+    circuit_breaker_threshold: 10
+    
+    # Expected throughput
+    min_operations_per_second: 1000
+    target_operations_per_second: 5000
+    max_operations_per_second: 10000

@@ -1,0 +1,51 @@
+{
+    "CacheClusterId": "kong-elasticache-production",
+    "Engine": "redis",
+    "EngineVersion": "7.0",
+    "CacheNodeType": "cache.t3.medium",
+    "NumCacheNodes": 1,
+    "Port": 6379,
+    "ParameterGroupName": "default.redis7",
+    "CacheSubnetGroupName": "kong-elasticache-subnet-group",
+    "SecurityGroupIds": [
+        "sg-kong-elasticache-security-group"
+    ],
+    "PreferredAvailabilityZone": "us-east-1a",
+    "PreferredMaintenanceWindow": "sun:03:00-sun:04:00",
+    "SnapshotRetentionLimit": 5,
+    "SnapshotWindow": "01:00-02:00",
+    "AutoMinorVersionUpgrade": true,
+    "AtRestEncryptionEnabled": true,
+    "TransitEncryptionEnabled": true,
+    "AuthToken": "your-secure-auth-token-here",
+    "LogDeliveryConfigurations": [
+        {
+            "DestinationType": "cloudwatch-logs",
+            "DestinationDetails": {
+                "CloudWatchLogsDetails": {
+                    "LogGroup": "/aws/elasticache/kong-redis"
+                }
+            },
+            "LogFormat": "json",
+            "LogType": "slow-log"
+        }
+    ],
+    "Tags": [
+        {
+            "Key": "Name",
+            "Value": "Kong ElastiCache Production"
+        },
+        {
+            "Key": "Environment",
+            "Value": "Production"
+        },
+        {
+            "Key": "Service",
+            "Value": "Kong-AWS-Masker"
+        },
+        {
+            "Key": "Purpose",
+            "Value": "AWS-Resource-Masking-Storage"
+        }
+    ]
+}

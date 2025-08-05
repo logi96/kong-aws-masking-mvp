@@ -1,0 +1,352 @@
+# Kong Gateway Deployment with ElastiCache Plugin Integration
+# Production-ready Kong Gateway with AWS Masker ElastiCache Edition
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong-gateway
+  namespace: kong-aws-masking
+  labels:
+    app: kong-gateway
+    component: api-gateway
+    version: "3.9.0.1-elasticache"
+spec:
+  replicas: 2  # High availability
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: kong-gateway
+  template:
+    metadata:
+      labels:
+        app: kong-gateway
+        component: api-gateway
+        version: "3.9.0.1-elasticache"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8001"
+        prometheus.io/path: "/metrics"
+    spec:
+      # Security context (relaxed for testing)
+      securityContext:
+        # runAsNonRoot: true  # Temporarily disabled for testing
+        # runAsUser: 1000
+        # fsGroup: 1000
+      
+      # Initialize Kong configuration and plugins
+      initContainers:
+      - name: kong-plugin-init
+        image: busybox:1.35
+        
+        # Resource requirements for ResourceQuota compliance
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "128Mi"
+            cpu: "100m"
+        
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "=== Kong Plugin and Config Initialization ==="
+          
+          # 1. Initialize Kong configuration
+          echo "Initializing Kong configuration..."
+          cp /config-template/kong.yml /kong-config/kong.yml
+          
+          # Replace environment variables in Kong config
+          sed -i "s/\${ELASTICACHE_ENDPOINT}/${ELASTICACHE_ENDPOINT}/g" /kong-config/kong.yml
+          sed -i "s/\${ELASTICACHE_PORT}/${ELASTICACHE_PORT}/g" /kong-config/kong.yml
+          sed -i "s/\${ANTHROPIC_API_KEY}/${ANTHROPIC_API_KEY}/g" /kong-config/kong.yml
+          
+          echo "✅ Kong configuration initialized"
+          
+          # 2. Initialize Kong plugin files (Kong standard structure)
+          echo "Initializing Kong plugin files..."
+          mkdir -p /kong-plugins/aws-masker
+          
+          # Copy plugin files to Kong standard plugin directory structure
+          cp /plugin-files/handler.lua /kong-plugins/aws-masker/
+          cp /plugin-files/schema.lua /kong-plugins/aws-masker/
+          cp /plugin-files/elasticache_client.lua /kong-plugins/aws-masker/
+          cp /plugin-files/json_safe.lua /kong-plugins/aws-masker/
+          cp /plugin-files/error_codes.lua /kong-plugins/aws-masker/
+          
+          echo "✅ Plugin files copied to Kong standard structure:"
+          ls -la /kong-plugins/aws-masker/
+          
+          echo "=== Initialization Complete ==="
+        env:
+        - name: ELASTICACHE_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_ENDPOINT
+        - name: ELASTICACHE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_PORT
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+        volumeMounts:
+        - name: kong-config-template
+          mountPath: /config-template
+        - name: kong-config
+          mountPath: /kong-config
+        - name: kong-plugin-files-source
+          mountPath: /plugin-files
+        - name: kong-plugins
+          mountPath: /kong-plugins
+      
+      containers:
+      - name: kong-gateway
+        image: kong:3.9-ubuntu
+        imagePullPolicy: IfNotPresent
+        
+        # Resource requirements
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        
+        # Environment variables
+        env:
+        # Kong core configuration
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_DECLARATIVE_CONFIG
+          value: "/usr/local/kong/declarative/kong.yml"
+        - name: KONG_PROXY_LISTEN
+          value: "0.0.0.0:8000"
+        - name: KONG_ADMIN_LISTEN
+          value: "0.0.0.0:8001"
+        - name: KONG_STATUS_LISTEN
+          value: "0.0.0.0:8100"
+        - name: KONG_LOG_LEVEL
+          value: "debug"
+        - name: KONG_PLUGINS
+          value: "aws-masker"
+        - name: KONG_LUA_PACKAGE_PATH
+          value: "/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;;"
+        
+        # ElastiCache configuration from ConfigMap
+        - name: ELASTICACHE_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_ENDPOINT
+        - name: ELASTICACHE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_PORT
+        - name: ELASTICACHE_SSL_ENABLED
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_SSL_ENABLED
+        
+        # API key from secret (Phase 1 Success Version integration)
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+        
+        # Performance settings
+        - name: KONG_WORKER_PROCESSES
+          value: "2"
+        - name: KONG_WORKER_CONNECTIONS
+          value: "4096"
+        - name: KONG_PROXY_ACCESS_LOG
+          value: "/dev/stdout"
+        - name: KONG_ADMIN_ACCESS_LOG
+          value: "/dev/stdout"
+        - name: KONG_PROXY_ERROR_LOG
+          value: "/dev/stderr"
+        - name: KONG_ADMIN_ERROR_LOG
+          value: "/dev/stderr"
+        
+        # Health and readiness probes
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: 8100
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 8100
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        
+        # Ports
+        ports:
+        - name: proxy
+          containerPort: 8000
+          protocol: TCP
+        - name: admin
+          containerPort: 8001
+          protocol: TCP
+        - name: status
+          containerPort: 8100
+          protocol: TCP
+        
+        # Volume mounts
+        volumeMounts:
+        - name: kong-config
+          mountPath: /usr/local/kong/declarative
+          readOnly: true
+        - name: kong-plugins
+          mountPath: /usr/local/share/lua/5.1/kong/plugins
+          readOnly: true
+        - name: kong-logs
+          mountPath: /usr/local/kong/logs
+        - name: kong-runtime
+          mountPath: /usr/local/kong/sockets
+        
+        # Security context (relaxed for testing)
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          # runAsNonRoot: true  # Temporarily disabled for testing
+          capabilities:
+            drop:
+            - ALL
+      
+      # Volumes
+      volumes:
+      - name: kong-config-template
+        configMap:
+          name: kong-declarative-config
+      - name: kong-config
+        emptyDir: {}
+      - name: kong-plugin-files-source
+        configMap:
+          name: kong-plugin-files
+          defaultMode: 0644
+      - name: kong-plugins
+        emptyDir: {}
+      - name: kong-logs
+        emptyDir: {}
+      - name: kong-runtime
+        emptyDir: {}
+      
+      # Node selection and affinity
+      nodeSelector:
+        kubernetes.io/os: linux
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - kong-gateway
+              topologyKey: kubernetes.io/hostname
+---
+# Kong Gateway Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-gateway-service
+  namespace: kong-aws-masking
+  labels:
+    app: kong-gateway
+    component: api-gateway
+spec:
+  type: ClusterIP
+  ports:
+  - name: proxy
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  - name: admin
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
+  selector:
+    app: kong-gateway
+---
+# Kong Admin Service (internal only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-admin-service
+  namespace: kong-aws-masking
+  labels:
+    app: kong-gateway
+    component: admin-api
+  annotations:
+    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+  type: ClusterIP
+  ports:
+  - name: admin
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
+  selector:
+    app: kong-gateway
+---
+# Horizontal Pod Autoscaler for Kong
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kong-gateway-hpa
+  namespace: kong-aws-masking
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kong-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60

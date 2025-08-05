@@ -1,0 +1,100 @@
+# Multi-stage Dockerfile for Kong Gateway with AWS Masker Plugin
+# Production-optimized version with enhanced security and performance
+
+# Build stage for dependencies and plugin compilation
+FROM kong:3.9.0-ubuntu AS builder
+
+USER root
+
+# Install minimal build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    lua5.1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
+# Validate plugin files (check for syntax errors)
+COPY plugins/aws-masker/*.lua /tmp/plugins/
+RUN for file in /tmp/plugins/*.lua; do \
+        luac -p "$file" || (echo "Syntax error in $file" && exit 1); \
+    done
+
+# Production runtime stage
+FROM kong:3.9.0-ubuntu AS production
+
+# Security: Create non-root user for enhanced security
+USER root
+
+# Install only runtime dependencies (no build tools)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* \
+    && apt-get autoremove -y
+
+# Note: Kong base image already includes required Lua libraries (cjson, socket, lpeg)
+
+# Create plugin directory with proper permissions
+RUN mkdir -p /usr/local/share/lua/5.1/kong/plugins/aws-masker \
+    && chown -R kong:kong /usr/local/share/lua/5.1/kong/plugins
+
+# Copy validated plugin files from builder
+COPY --from=builder /tmp/plugins/ /usr/local/share/lua/5.1/kong/plugins/aws-masker/
+COPY --chown=kong:kong plugins/aws-masker/*.lua /usr/local/share/lua/5.1/kong/plugins/aws-masker/
+
+# Production-optimized Kong configuration
+ENV KONG_DATABASE=off \
+    KONG_DECLARATIVE_CONFIG=/usr/local/kong/declarative/kong.yml \
+    KONG_PLUGINS=bundled,aws-masker \
+    KONG_LUA_PACKAGE_PATH=/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;/usr/local/kong/plugins/?.lua;/usr/local/kong/plugins/?/init.lua;; \
+    KONG_LOG_LEVEL=warn \
+    KONG_PROXY_ACCESS_LOG=/dev/stdout \
+    KONG_ADMIN_ACCESS_LOG=/dev/stdout \
+    KONG_PROXY_ERROR_LOG=/dev/stderr \
+    KONG_ADMIN_ERROR_LOG=/dev/stderr
+
+# Performance optimization for production
+ENV KONG_NGINX_WORKER_PROCESSES=auto \
+    KONG_NGINX_WORKER_CONNECTIONS=4096 \
+    KONG_MEM_CACHE_SIZE=4096m \
+    KONG_DB_CACHE_TTL=7200 \
+    KONG_DB_CACHE_NEG_TTL=600 \
+    KONG_NGINX_HTTP2_MAX_FIELD_SIZE=16k \
+    KONG_NGINX_HTTP2_MAX_HEADER_SIZE=32k \
+    KONG_CLIENT_BODY_BUFFER_SIZE=16m \
+    KONG_NGINX_PROXY_PROXY_BUFFER_SIZE=256k \
+    KONG_NGINX_PROXY_PROXY_BUFFERS="64 256k"
+
+# Security hardening
+ENV KONG_TRUSTED_IPS=0.0.0.0/0,::/0 \
+    KONG_REAL_IP_RECURSIVE=on \
+    KONG_NGINX_PROXY_REAL_IP_HEADER=X-Forwarded-For
+
+# Resource limits and monitoring
+ENV KONG_STATUS_LISTEN=0.0.0.0:8100 \
+    KONG_ADMIN_LISTEN=0.0.0.0:8001 \
+    KONG_CLUSTER_LISTEN=off
+
+# Production health check with timeout optimization
+HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=5 \
+    CMD kong health && curl -f http://localhost:8100/status || exit 1
+
+# Security: Switch to non-root user
+USER kong
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /usr/local/kong/logs /usr/local/kong/declarative
+
+# Expose only necessary ports
+EXPOSE 8000 8001 8100
+
+# Production entrypoint with signal handling
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["kong", "docker-start"]
+
+# Metadata labels for production tracking
+LABEL maintainer="Kong AWS Masking Team" \
+      version="1.0.0" \
+      description="Production Kong Gateway with AWS Masker Plugin" \
+      environment="production" \
+      security.scan="required"

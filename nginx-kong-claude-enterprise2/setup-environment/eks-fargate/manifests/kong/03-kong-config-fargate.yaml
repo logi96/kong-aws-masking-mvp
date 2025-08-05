@@ -1,0 +1,500 @@
+# Kong Configuration for EKS Fargate
+# Declarative configuration and AWS masker plugin
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-declarative-config
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: api-gateway-config
+    platform: eks-fargate
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    _transform: true
+    
+    # Services configuration
+    services:
+    - name: claude-api-service
+      url: https://api.anthropic.com
+      retries: 3
+      connect_timeout: 30000
+      write_timeout: 30000
+      read_timeout: 30000
+      protocol: https
+      host: api.anthropic.com
+      port: 443
+      
+      # Routes for Claude API
+      routes:
+      - name: claude-messages-route
+        paths:
+        - /v1/messages
+        methods:
+        - POST
+        strip_path: false
+        preserve_host: false
+        
+      - name: claude-complete-route
+        paths:
+        - /v1/complete
+        methods:
+        - POST
+        strip_path: false
+        preserve_host: false
+    
+    # Global plugins configuration
+    plugins:
+    # AWS Masker Plugin (Global)
+    - name: aws-masker
+      config:
+        # ElastiCache Redis configuration
+        elasticache_endpoint: "${ELASTICACHE_ENDPOINT}"
+        elasticache_port: "${ELASTICACHE_PORT}"
+        elasticache_ssl_enabled: true
+        elasticache_timeout: 5000
+        connection_pool_size: 20
+        
+        # Redis fallback configuration
+        redis_host: "${REDIS_HOST}"
+        redis_port: "${REDIS_PORT}"
+        redis_timeout: 5000
+        use_redis: true
+        
+        # AWS Masking configuration
+        mask_ec2_instances: true
+        mask_s3_buckets: true
+        mask_rds_instances: true
+        mask_vpc_resources: true
+        mask_iam_resources: true
+        mask_lambda_functions: true
+        mask_cloudformation_stacks: true
+        mask_elastic_load_balancers: true
+        mask_auto_scaling_groups: true
+        mask_security_groups: true
+        mask_subnets: true
+        mask_route_tables: true
+        mask_nat_gateways: true
+        mask_internet_gateways: true
+        mask_vpc_endpoints: true
+        mask_elastic_ips: true
+        mask_network_interfaces: true
+        mask_snapshots: true
+        mask_volumes: true
+        mask_key_pairs: true
+        
+        # Claude API configuration
+        anthropic_api_key: "${ANTHROPIC_API_KEY}"
+        anthropic_base_url: "https://api.anthropic.com"
+        anthropic_timeout: 30000
+        
+        # Mapping and storage settings
+        mapping_ttl: 604800  # 7 days
+        max_entries: 10000
+        
+        # Security and reliability
+        fail_secure: true
+        enable_logging: true
+        log_level: "info"
+        
+        # Performance optimization
+        enable_request_buffering: true
+        enable_response_buffering: true
+        buffer_size: 65536  # 64KB
+        
+        # Pattern validation
+        validate_patterns: true
+        max_pattern_length: 1024
+
+    # Rate Limiting Plugin
+    - name: rate-limiting
+      config:
+        minute: 1000
+        hour: 10000
+        policy: redis
+        redis_host: "${REDIS_HOST}"
+        redis_port: "${REDIS_PORT}"
+        redis_timeout: 2000
+        fault_tolerant: true
+        hide_client_headers: false
+
+    # Request Size Limiting
+    - name: request-size-limiting
+      config:
+        allowed_payload_size: 10  # 10MB limit
+
+    # CORS Plugin
+    - name: cors
+      config:
+        origins:
+        - "*"
+        methods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-MD5
+        - Content-Type
+        - Date
+        - X-Auth-Token
+        - x-api-key
+        - Authorization
+        exposed_headers:
+        - X-Auth-Token
+        credentials: true
+        max_age: 3600
+        preflight_continue: false
+
+---
+# ElastiCache Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticache-config
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: cache-config
+    platform: eks-fargate
+data:
+  # ElastiCache connection settings
+  ELASTICACHE_ENDPOINT: "localhost.localstack.cloud"  # Default for LocalStack
+  ELASTICACHE_PORT: "4510"  # LocalStack Redis port
+  ELASTICACHE_SSL_ENABLED: "false"  # LocalStack doesn't use SSL by default
+  CONNECTION_POOL_SIZE: "20"
+  MAPPING_TTL: "604800"  # 7 days in seconds
+  
+  # Redis configuration script
+  redis-config.lua: |
+    -- Redis configuration for ElastiCache
+    local redis_config = {
+        endpoint = os.getenv("ELASTICACHE_ENDPOINT") or "localhost.localstack.cloud",
+        port = tonumber(os.getenv("ELASTICACHE_PORT") or "4510"),
+        ssl_enabled = (os.getenv("ELASTICACHE_SSL_ENABLED") or "false") == "true",
+        timeout = 5000,
+        pool_size = tonumber(os.getenv("CONNECTION_POOL_SIZE") or "20"),
+        keepalive_timeout = 60000,
+        keepalive_pool_size = 30
+    }
+    
+    return redis_config
+
+---
+# Kong Plugin Secrets
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kong-plugin-config
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: api-gateway-secrets
+    platform: eks-fargate
+type: Opaque
+data:
+  # Base64 encoded values (replace with actual values)
+  # echo -n "sk-ant-api03-your-key-here" | base64
+  anthropic-api-key: dGVzdC1rZXktZm9yLWxvY2Fsc3RhY2s=  # test-key-for-localstack
+  
+  # Redis password if needed (for production ElastiCache)
+  # echo -n "your-redis-password" | base64
+  redis-password: ""
+  
+  # Kong admin token
+  # echo -n "admin-token-12345" | base64
+  kong-admin-token: YWRtaW4tdG9rZW4tMTIzNDU=  # admin-token-12345
+
+---
+# AWS Masker Plugin Files ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-aws-masker-plugin
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: aws-masker-plugin
+    platform: eks-fargate
+data:
+  # Main plugin handler
+  handler.lua: |
+    local aws_masker = {
+        PRIORITY = 1000,
+        VERSION = "2.0.0-fargate"
+    }
+    
+    local kong = kong
+    local ngx = ngx
+    local cjson = require("cjson.safe")
+    local redis = require("resty.redis")
+    
+    -- Plugin configuration
+    local function get_redis_connection(conf)
+        local red = redis:new()
+        red:set_timeout(conf.elasticache_timeout or 5000)
+        
+        local ok, err = red:connect(conf.elasticache_endpoint, conf.elasticache_port)
+        if not ok then
+            kong.log.err("Failed to connect to Redis: ", err)
+            return nil, err
+        end
+        
+        return red, nil
+    end
+    
+    -- AWS resource patterns
+    local patterns = {
+        -- EC2 Instances
+        { pattern = "i%-[0-9a-f]{17}", replacement = "EC2_INSTANCE_%d", name = "ec2_instance" },
+        { pattern = "i%-[0-9a-f]{8}", replacement = "EC2_INSTANCE_%d", name = "ec2_instance_short" },
+        
+        -- S3 Buckets
+        { pattern = "[a-z0-9][a-z0-9%-]*[a-z0-9]%.s3%.amazonaws%.com", replacement = "S3_BUCKET_%d.s3.amazonaws.com", name = "s3_bucket_url" },
+        { pattern = "s3://[a-z0-9][a-z0-9%-]*[a-z0-9]", replacement = "s3://S3_BUCKET_%d", name = "s3_bucket_uri" },
+        
+        -- RDS Instances
+        { pattern = "[a-z0-9%-]+%.cluster%-[a-z0-9]+%.[a-z0-9%-]+%.rds%.amazonaws%.com", replacement = "RDS_CLUSTER_%d", name = "rds_cluster" },
+        { pattern = "[a-z0-9%-]+%.[a-z0-9]+%.[a-z0-9%-]+%.rds%.amazonaws%.com", replacement = "RDS_INSTANCE_%d", name = "rds_instance" },
+        
+        -- VPC Resources
+        { pattern = "vpc%-[0-9a-f]{17}", replacement = "VPC_%d", name = "vpc" },
+        { pattern = "subnet%-[0-9a-f]{17}", replacement = "SUBNET_%d", name = "subnet" },
+        { pattern = "sg%-[0-9a-f]{17}", replacement = "SECURITY_GROUP_%d", name = "security_group" },
+        
+        -- Lambda Functions
+        { pattern = "arn:aws:lambda:[a-z0-9%-]+:[0-9]+:function:[a-zA-Z0-9%-_]+", replacement = "LAMBDA_FUNCTION_%d", name = "lambda_function" },
+        
+        -- IAM Resources
+        { pattern = "arn:aws:iam::[0-9]+:role/[a-zA-Z0-9%-_/]+", replacement = "IAM_ROLE_%d", name = "iam_role" },
+        { pattern = "arn:aws:iam::[0-9]+:user/[a-zA-Z0-9%-_/]+", replacement = "IAM_USER_%d", name = "iam_user" },
+        
+        -- CloudFormation
+        { pattern = "arn:aws:cloudformation:[a-z0-9%-]+:[0-9]+:stack/[a-zA-Z0-9%-]+/[a-z0-9%-]+", replacement = "CLOUDFORMATION_STACK_%d", name = "cloudformation_stack" },
+        
+        -- Load Balancers
+        { pattern = "arn:aws:elasticloadbalancing:[a-z0-9%-]+:[0-9]+:loadbalancer/[a-z]+/[a-zA-Z0-9%-]+/[a-z0-9]+", replacement = "LOAD_BALANCER_%d", name = "load_balancer" },
+        
+        -- Auto Scaling Groups
+        { pattern = "arn:aws:autoscaling:[a-z0-9%-]+:[0-9]+:autoScalingGroup:[a-z0-9%-]+:autoScalingGroupName/[a-zA-Z0-9%-_]+", replacement = "AUTO_SCALING_GROUP_%d", name = "auto_scaling_group" }
+    }
+    
+    local masking_counters = {}
+    local mask_mappings = {}
+    
+    -- Masking function
+    local function mask_aws_resources(text, red)
+        if not text then return text end
+        
+        local result = text
+        local changes_made = false
+        
+        for _, pattern_config in ipairs(patterns) do
+            local pattern = pattern_config.pattern
+            local replacement_template = pattern_config.replacement
+            local pattern_name = pattern_config.name
+            
+            local matches = {}
+            local start_pos = 1
+            
+            while true do
+                local match_start, match_end = string.find(result, pattern, start_pos)
+                if not match_start then break end
+                
+                local match = string.sub(result, match_start, match_end)
+                table.insert(matches, {match = match, start = match_start, ending = match_end})
+                start_pos = match_end + 1
+            end
+            
+            -- Process matches in reverse order to maintain positions
+            for i = #matches, 1, -1 do
+                local match_info = matches[i]
+                local original = match_info.match
+                
+                -- Check if already masked
+                if mask_mappings[original] then
+                    local masked = mask_mappings[original]
+                    result = string.sub(result, 1, match_info.start - 1) .. masked .. string.sub(result, match_info.ending + 1)
+                    changes_made = true
+                else
+                    -- Create new mask
+                    masking_counters[pattern_name] = (masking_counters[pattern_name] or 0) + 1
+                    local masked = string.format(replacement_template, masking_counters[pattern_name])
+                    
+                    -- Store mapping
+                    mask_mappings[original] = masked
+                    mask_mappings[masked] = original  -- Reverse mapping for unmasking
+                    
+                    -- Store in Redis if available
+                    if red then
+                        local ok, err = red:setex("mask:" .. original, 604800, masked)  -- 7 days TTL
+                        if ok then
+                            red:setex("unmask:" .. masked, 604800, original)
+                        end
+                    end
+                    
+                    result = string.sub(result, 1, match_info.start - 1) .. masked .. string.sub(result, match_info.ending + 1)
+                    changes_made = true
+                end
+            end
+        end
+        
+        return result, changes_made
+    end
+    
+    -- Unmasking function
+    local function unmask_aws_resources(text, red)
+        if not text then return text end
+        
+        local result = text
+        local changes_made = false
+        
+        -- Unmask from local mappings
+        for masked, original in pairs(mask_mappings) do
+            if type(original) == "string" and not string.match(masked, "^[A-Z_]+_%d+$") then
+                -- This is a reverse mapping (masked -> original)
+                local escaped_masked = string.gsub(masked, "([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+                if string.find(result, escaped_masked) then
+                    result = string.gsub(result, escaped_masked, original)
+                    changes_made = true
+                end
+            end
+        end
+        
+        return result, changes_made
+    end
+    
+    -- Access phase: mask request
+    function aws_masker:access(conf)
+        -- Get Redis connection
+        local red, err = get_redis_connection(conf)
+        if not red and conf.fail_secure then
+            kong.log.err("Redis connection failed in fail-secure mode: ", err)
+            return kong.response.exit(503, {error = "Service temporarily unavailable"})
+        end
+        
+        -- Get request body
+        local body = kong.request.get_raw_body()
+        if body then
+            local masked_body, changes = mask_aws_resources(body, red)
+            if changes then
+                kong.service.request.set_raw_body(masked_body)
+                kong.log.info("AWS resources masked in request")
+            end
+        end
+        
+        -- Close Redis connection
+        if red then
+            red:set_keepalive(60000, 30)
+        end
+    end
+    
+    -- Header filter phase: prepare for response unmasking
+    function aws_masker:header_filter(conf)
+        local status = kong.response.get_status()
+        if status >= 200 and status < 300 then
+            kong.ctx.shared.unmask_response = true
+        end
+    end
+    
+    -- Body filter phase: unmask response
+    function aws_masker:body_filter(conf)
+        if not kong.ctx.shared.unmask_response then
+            return
+        end
+        
+        local chunk = kong.response.get_raw_body()
+        if chunk then
+            local red, err = get_redis_connection(conf)
+            
+            local unmasked_chunk, changes = unmask_aws_resources(chunk, red)
+            if changes then
+                kong.response.set_raw_body(unmasked_chunk)
+                kong.log.info("AWS resources unmasked in response")
+            end
+            
+            if red then
+                red:set_keepalive(60000, 30)
+            end
+        end
+    end
+    
+    return aws_masker
+  
+  # Plugin schema
+  schema.lua: |
+    local typedefs = require "kong.db.schema.typedefs"
+    
+    return {
+        name = "aws-masker",
+        fields = {
+            { consumer = typedefs.no_consumer },
+            { protocols = typedefs.protocols_http },
+            { config = {
+                type = "record",
+                fields = {
+                    -- ElastiCache configuration
+                    { elasticache_endpoint = { type = "string", default = "localhost.localstack.cloud" } },
+                    { elasticache_port = { type = "integer", default = 4510 } },
+                    { elasticache_ssl_enabled = { type = "boolean", default = false } },
+                    { elasticache_timeout = { type = "integer", default = 5000 } },
+                    { connection_pool_size = { type = "integer", default = 20 } },
+                    
+                    -- Redis fallback
+                    { redis_host = { type = "string", default = "localhost.localstack.cloud" } },
+                    { redis_port = { type = "integer", default = 4510 } },
+                    { redis_timeout = { type = "integer", default = 5000 } },
+                    { use_redis = { type = "boolean", default = true } },
+                    
+                    -- AWS masking configuration
+                    { mask_ec2_instances = { type = "boolean", default = true } },
+                    { mask_s3_buckets = { type = "boolean", default = true } },
+                    { mask_rds_instances = { type = "boolean", default = true } },
+                    { mask_vpc_resources = { type = "boolean", default = true } },
+                    { mask_iam_resources = { type = "boolean", default = true } },
+                    { mask_lambda_functions = { type = "boolean", default = true } },
+                    { mask_cloudformation_stacks = { type = "boolean", default = true } },
+                    { mask_elastic_load_balancers = { type = "boolean", default = true } },
+                    { mask_auto_scaling_groups = { type = "boolean", default = true } },
+                    { mask_security_groups = { type = "boolean", default = true } },
+                    { mask_subnets = { type = "boolean", default = true } },
+                    { mask_route_tables = { type = "boolean", default = true } },
+                    { mask_nat_gateways = { type = "boolean", default = true } },
+                    { mask_internet_gateways = { type = "boolean", default = true } },
+                    { mask_vpc_endpoints = { type = "boolean", default = true } },
+                    { mask_elastic_ips = { type = "boolean", default = true } },
+                    { mask_network_interfaces = { type = "boolean", default = true } },
+                    { mask_snapshots = { type = "boolean", default = true } },
+                    { mask_volumes = { type = "boolean", default = true } },
+                    { mask_key_pairs = { type = "boolean", default = true } },
+                    
+                    -- Claude API configuration
+                    { anthropic_api_key = { type = "string", required = true } },
+                    { anthropic_base_url = { type = "string", default = "https://api.anthropic.com" } },
+                    { anthropic_timeout = { type = "integer", default = 30000 } },
+                    
+                    -- Storage and performance
+                    { mapping_ttl = { type = "integer", default = 604800 } },
+                    { max_entries = { type = "integer", default = 10000 } },
+                    { fail_secure = { type = "boolean", default = true } },
+                    { enable_logging = { type = "boolean", default = true } },
+                    { log_level = { type = "string", default = "info" } },
+                    { enable_request_buffering = { type = "boolean", default = true } },
+                    { enable_response_buffering = { type = "boolean", default = true } },
+                    { buffer_size = { type = "integer", default = 65536 } },
+                    { validate_patterns = { type = "boolean", default = true } },
+                    { max_pattern_length = { type = "integer", default = 1024 } }
+                }
+            }}
+        }
+    }

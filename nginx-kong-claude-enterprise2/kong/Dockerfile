@@ -1,5 +1,5 @@
 # Kong Gateway with AWS Masker Plugin
-ARG KONG_VERSION=3.9.0
+ARG KONG_VERSION=3.8.0
 FROM kong:${KONG_VERSION}-ubuntu
 
 # Install dependencies for the aws-masker plugin
@@ -15,12 +15,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Create plugin directory structure
 RUN mkdir -p /usr/local/share/lua/5.1/kong/plugins/aws-masker
+RUN mkdir -p /usr/local/kong/declarative
 
 # Copy the AWS masker plugin files
 COPY plugins/aws-masker/*.lua /usr/local/share/lua/5.1/kong/plugins/aws-masker/
 
+# Copy minimal Kong configuration
+COPY kong-minimal.yml /usr/local/kong/declarative/kong.yml
+
 # Set proper permissions
 RUN chown -R kong:kong /usr/local/share/lua/5.1/kong/plugins/aws-masker
+RUN chown -R kong:kong /usr/local/kong/declarative
 
 # Switch back to kong user
 USER kong

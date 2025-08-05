@@ -1,0 +1,32 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass test-password
+    ports:
+      - "16379:6379"
+    networks:
+      - claude-network
+
+  kong:
+    image: kong/kong-gateway:3.9.0.1
+    depends_on:
+      - redis
+    environment:
+      - KONG_DATABASE=off
+      - KONG_DECLARATIVE_CONFIG=/usr/local/kong/declarative/kong-traditional.yml
+      - KONG_PROXY_LISTEN=0.0.0.0:8010
+      - KONG_ADMIN_LISTEN=0.0.0.0:8001
+      - KONG_PLUGINS=bundled,aws-masker
+      - KONG_LOG_LEVEL=info
+    volumes:
+      - ./kong/kong-traditional.yml:/usr/local/kong/declarative/kong-traditional.yml:ro
+      - ./kong/plugins:/usr/local/kong/plugins:ro
+    ports:
+      - "18001:8001"
+      - "18010:8010"
+    networks:
+      - claude-network
+
+networks:
+  claude-network:
+    driver: bridge

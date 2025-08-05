@@ -1,0 +1,171 @@
+# EKS Fargate Profile Configuration
+# This creates the Fargate profile for running Kong AWS Masking workloads
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fargate-profile-config
+  namespace: kong-aws-masking
+data:
+  # Fargate Profile Configuration for AWS CLI
+  create-fargate-profile.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    
+    # Configuration
+    CLUSTER_NAME="${EKS_CLUSTER_NAME:-kong-masking-fargate}"
+    FARGATE_PROFILE_NAME="${FARGATE_PROFILE_NAME:-kong-aws-masking-profile}"
+    EXECUTION_ROLE_NAME="${EXECUTION_ROLE_NAME:-eks-fargate-pod-execution-role}"
+    AWS_REGION="${AWS_REGION:-ap-northeast-2}"
+    AWS_ENDPOINT="${AWS_ENDPOINT:-}"
+    
+    # Set AWS CLI endpoint for LocalStack
+    if [ -n "$AWS_ENDPOINT" ]; then
+        AWS_CMD="aws --endpoint-url=$AWS_ENDPOINT --region=$AWS_REGION"
+    else
+        AWS_CMD="aws --region=$AWS_REGION"
+    fi
+    
+    echo "🚀 Creating EKS Fargate Profile for Kong AWS Masking..."
+    echo "Cluster: $CLUSTER_NAME"
+    echo "Profile: $FARGATE_PROFILE_NAME"
+    echo "Region: $AWS_REGION"
+    
+    # Step 1: Create Fargate Pod Execution Role
+    echo "📋 Step 1: Creating Fargate Pod Execution Role..."
+    
+    # Trust policy for Fargate
+    cat > /tmp/fargate-trust-policy.json << EOF
+    {
+      "Version": "2012-10-17",
+      "Statement": [
+        {
+          "Effect": "Allow",
+          "Principal": {
+            "Service": "eks-fargate-pods.amazonaws.com"
+          },
+          "Action": "sts:AssumeRole"
+        }
+      ]
+    }
+    EOF
+    
+    # Create the execution role
+    if ! $AWS_CMD iam get-role --role-name $EXECUTION_ROLE_NAME >/dev/null 2>&1; then
+        echo "Creating execution role: $EXECUTION_ROLE_NAME"
+        $AWS_CMD iam create-role \
+            --role-name $EXECUTION_ROLE_NAME \
+            --assume-role-policy-document file:///tmp/fargate-trust-policy.json \
+            --description "EKS Fargate Pod Execution Role for Kong AWS Masking"
+    else
+        echo "✅ Execution role already exists: $EXECUTION_ROLE_NAME"
+    fi
+    
+    # Attach the required policy
+    echo "Attaching AmazonEKSFargatePodExecutionRolePolicy..."
+    $AWS_CMD iam attach-role-policy \
+        --role-name $EXECUTION_ROLE_NAME \
+        --policy-arn arn:aws:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy
+    
+    # Get the role ARN
+    EXECUTION_ROLE_ARN=$($AWS_CMD iam get-role \
+        --role-name $EXECUTION_ROLE_NAME \
+        --query 'Role.Arn' \
+        --output text)
+    
+    echo "✅ Execution Role ARN: $EXECUTION_ROLE_ARN"
+    
+    # Step 2: Get subnet information
+    echo "📋 Step 2: Getting private subnet information..."
+    
+    # Get VPC ID for the EKS cluster
+    VPC_ID=$($AWS_CMD eks describe-cluster \
+        --name $CLUSTER_NAME \
+        --query 'cluster.resourcesVpcConfig.vpcId' \
+        --output text 2>/dev/null || echo "")
+    
+    if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+        echo "⚠️  Warning: Could not get VPC ID from EKS cluster"
+        echo "Using default subnet discovery..."
+        
+        # For LocalStack, use default subnets with private route tables
+        SUBNET_IDS=$($AWS_CMD ec2 describe-subnets \
+            --filters "Name=tag:Type,Values=private" \
+            --query 'Subnets[*].SubnetId' \
+            --output text 2>/dev/null || echo "")
+        
+        if [ -z "$SUBNET_IDS" ]; then
+            # Fallback: get any available subnets
+            SUBNET_IDS=$($AWS_CMD ec2 describe-subnets \
+                --query 'Subnets[0:2].SubnetId' \
+                --output text)
+        fi
+    else
+        # Get private subnets from the VPC
+        SUBNET_IDS=$($AWS_CMD ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:kubernetes.io/role/internal-elb,Values=1" \
+            --query 'Subnets[*].SubnetId' \
+            --output text)
+        
+        if [ -z "$SUBNET_IDS" ]; then
+            # Fallback: get all subnets in VPC
+            SUBNET_IDS=$($AWS_CMD ec2 describe-subnets \
+                --filters "Name=vpc-id,Values=$VPC_ID" \
+                --query 'Subnets[*].SubnetId' \
+                --output text)
+        fi
+    fi
+    
+    if [ -z "$SUBNET_IDS" ]; then
+        echo "❌ Error: Could not find any subnets"
+        exit 1
+    fi
+    
+    # Convert space-separated subnet IDs to array format
+    SUBNET_ARRAY=$(echo $SUBNET_IDS | tr ' ' ',' | sed 's/,$//')
+    echo "✅ Found subnets: $SUBNET_ARRAY"
+    
+    # Step 3: Create Fargate Profile
+    echo "📋 Step 3: Creating Fargate Profile..."
+    
+    if ! $AWS_CMD eks describe-fargate-profile \
+        --cluster-name $CLUSTER_NAME \
+        --fargate-profile-name $FARGATE_PROFILE_NAME >/dev/null 2>&1; then
+        
+        echo "Creating Fargate profile: $FARGATE_PROFILE_NAME"
+        $AWS_CMD eks create-fargate-profile \
+            --cluster-name $CLUSTER_NAME \
+            --fargate-profile-name $FARGATE_PROFILE_NAME \
+            --pod-execution-role-arn $EXECUTION_ROLE_ARN \
+            --subnets $SUBNET_IDS \
+            --selectors namespace=kong-aws-masking \
+            --tags Environment=production,Application=kong-aws-masking,ManagedBy=eks-fargate
+        
+        echo "⏳ Waiting for Fargate profile to become active..."
+        $AWS_CMD eks wait fargate-profile-active \
+            --cluster-name $CLUSTER_NAME \
+            --fargate-profile-name $FARGATE_PROFILE_NAME
+        
+        echo "✅ Fargate profile created successfully!"
+    else
+        echo "✅ Fargate profile already exists: $FARGATE_PROFILE_NAME"
+    fi
+    
+    # Step 4: Verify configuration
+    echo "📋 Step 4: Verifying Fargate profile configuration..."
+    
+    $AWS_CMD eks describe-fargate-profile \
+        --cluster-name $CLUSTER_NAME \
+        --fargate-profile-name $FARGATE_PROFILE_NAME \
+        --query 'fargateProfile.{Name:fargateProfileName,Status:status,PodExecutionRoleArn:podExecutionRoleArn,Subnets:subnets,Selectors:selectors}' \
+        --output table
+    
+    echo "🎉 Fargate Profile Setup Complete!"
+    echo ""
+    echo "📋 Next Steps:"
+    echo "1. Deploy Fargate-compatible Kubernetes manifests"
+    echo "2. Ensure all pods have proper security contexts"
+    echo "3. Verify resource requests match Fargate specifications"
+    
+    # Cleanup temp files
+    rm -f /tmp/fargate-trust-policy.json

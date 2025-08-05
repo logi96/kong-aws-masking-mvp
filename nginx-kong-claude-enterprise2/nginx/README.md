@@ -1,277 +1,380 @@
-# Nginx Reverse Proxy for Kong Gateway
+# Nginx Enterprise Proxy - Kong AWS Masking MVP
 
-This directory contains the Nginx reverse proxy configuration that sits in front of Kong Gateway, providing additional security, monitoring, and traffic management capabilities.
+**Project**: nginx-kong-claude-enterprise2  
+**Purpose**: High-performance HTTP proxy layer for Kong AWS masking system  
+**Last Updated**: 2025-07-30
 
-## Architecture
+## 🎯 Overview
 
-```
-Client → Nginx (8082) → Kong (8000) → Claude API
-              ↓
-        Monitoring (9090)
-```
+This Nginx configuration provides the enterprise proxy layer that sits between Claude Code clients and the Kong Gateway, handling HTTP traffic routing, load balancing, and secure header forwarding for the AWS masking system.
 
-## Features
-
-### 1. **Security Enhancement**
-- Rate limiting (10 req/s for Claude API, configurable burst)
-- Security headers (X-Frame-Options, X-Content-Type-Options, X-XSS-Protection)
-- Request size limits (100MB for Claude API payloads)
-- CORS handling with preflight support
-
-### 2. **Observability**
-- Structured JSON logging with request tracing
-- Prometheus-compatible metrics endpoint
-- Health checks with dependency status
-- Request ID generation and forwarding
-- Detailed access logs with upstream timing
-
-### 3. **Performance Optimization**
-- Connection pooling to Kong backend
-- Gzip compression for responses
-- Optimized buffer sizes
-- Keep-alive connections
-- Worker auto-scaling based on CPU cores
-
-### 4. **High Availability**
-- Health check endpoints at multiple levels
-- Graceful error handling with custom error pages
-- Automatic retry with configurable timeouts
-- Circuit breaker pattern for backend failures
-
-## Directory Structure
+## 📂 Current Structure
 
 ```
 nginx/
-├── Dockerfile              # Alpine-based Nginx image
-├── nginx.conf             # Main Nginx configuration
-├── conf.d/                # Additional configurations
-│   ├── claude-proxy.conf  # Main proxy configuration
-│   ├── monitoring.conf    # Monitoring endpoints
-│   └── production.conf    # Production overrides (if any)
-├── html/                  # Static files
-│   ├── 40x.json          # Client error response
-│   └── 50x.json          # Server error response
-├── deploy.sh             # Deployment script
-├── test-nginx-proxy.sh   # Comprehensive test suite
-└── API-DESIGN.md         # Detailed API design document
+├── README.md                    # This documentation
+├── Dockerfile                   # Docker build configuration (ACTIVE)
+├── nginx.conf                   # Main nginx configuration (ACTIVE)  
+├── conf.d/                      # Server configurations
+│   └── claude-proxy.conf        # Claude API proxy config (ACTIVE)
+└── archive/                     # Unused files (ARCHIVED)
+    ├── Dockerfile.prod          # Production Dockerfile (unused)
+    └── blue-green.conf          # Blue-green deployment config (placeholder)
 ```
 
-## Quick Start
+## 🔗 Proxy Chain Architecture
 
-### 1. Deploy Nginx Proxy
-
-```bash
-# Deploy using the provided script
-./deploy.sh
-
-# Or manually with docker-compose
-docker-compose -f docker-compose.nginx.yml up -d
+### **Current Flow**:
+```
+[Claude Code Client] 
+    ↓ HTTP (port 8082)
+[Nginx Proxy] 
+    ↓ HTTP (internal kong:8010)
+[Kong Gateway + AWS Masker] 
+    ↓ HTTPS (api.anthropic.com)
+[Claude API]
 ```
 
-### 2. Verify Health
+### **Security Architecture**:
+- **Nginx**: Simple proxy forwarding (no API key handling)
+- **Kong**: Environment-based API key injection + AWS masking
+- **Redis**: Masking data persistence
 
-```bash
-# Check basic health
-curl http://localhost:8082/health
+## 🔒 Security Improvements (Critical Fix Applied)
 
-# Check full health with dependencies
-curl http://localhost:8082/health/full | jq .
-
-# View metrics
-curl http://localhost:8082/metrics
+### **❌ Previous Security Issue (RESOLVED)**:
+```nginx
+# DANGEROUS - API key hardcoded in nginx
+proxy_set_header x-api-key "sk-ant-api03-...";
 ```
 
-### 3. Run Tests
-
-```bash
-# Run comprehensive test suite
-./test-nginx-proxy.sh
-
-# Check test report
-ls -la ../tests/test-report/nginx-proxy-test-*.md
+### **✅ Current Secure Configuration**:
+```nginx
+# SECURE - API key managed by Kong from environment
+proxy_set_header x-api-key $http_x_api_key;
 ```
 
-## Configuration
+### **Security Flow**:
+1. **Client Request** → Nginx (no API key)
+2. **Nginx Forward** → Kong (header passthrough)  
+3. **Kong Transform** → Adds `x-api-key: ${ANTHROPIC_API_KEY}` from environment
+4. **Kong Forward** → Claude API (secure API key injection)
 
-### Environment Variables
+## 📋 Active Configuration Files
 
-Configure in `docker-compose.yml` or `.env`:
+### **Dockerfile** ⭐
+**Purpose**: Container build configuration  
+**Usage**: Referenced by `docker-compose.yml`
 
-```bash
-NGINX_PROXY_PORT=8082          # Main proxy port
-NGINX_WORKER_PROCESSES=auto    # Number of worker processes
-NGINX_WORKER_CONNECTIONS=1024  # Connections per worker
-TZ=Asia/Seoul                  # Timezone
+```dockerfile
+FROM nginx:1.27-alpine
+RUN apk add --no-cache curl
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY conf.d/claude-proxy.conf /etc/nginx/conf.d/claude-proxy.conf
+EXPOSE 8082
 ```
 
-### Rate Limiting
+**Key Features**:
+- Alpine Linux base for security and size
+- Health check with curl
+- Custom configuration overlay
 
-Adjust in `conf.d/claude-proxy.conf`:
+### **nginx.conf** ⭐
+**Purpose**: Main nginx server configuration  
+**Key Settings**:
 
 ```nginx
-limit_req_zone $binary_remote_addr zone=claude_api:10m rate=10r/s;
+worker_processes auto;               # Auto-scale based on CPU cores
+worker_connections 1024;            # Connection limit per worker
+keepalive_timeout 65;               # Connection persistence
+include /etc/nginx/conf.d/*.conf;   # Include all server configs
 ```
 
-### Upstream Configuration
+**Optimizations**:
+- Automatic worker scaling
+- Efficient connection handling
+- Structured logging to `/var/log/nginx/`
 
-Kong backend in `conf.d/claude-proxy.conf`:
+### **conf.d/claude-proxy.conf** ⭐
+**Purpose**: Claude API proxy server configuration  
+**Listen Port**: 8082  
+**Upstream**: kong:8010
 
+**Critical Configuration**:
 ```nginx
 upstream kong_backend {
-    server kong:8000 max_fails=3 fail_timeout=30s;
-    keepalive 32;
+    server kong:8010;
+}
+
+server {
+    listen 8082;
+    
+    location /health {
+        return 200 '{"status":"healthy"}';
+        add_header Content-Type application/json;
+    }
+    
+    location / {
+        proxy_pass http://kong_backend;
+        proxy_set_header Host api.anthropic.com;
+        
+        # Security: Forward headers, no hardcoded secrets
+        proxy_set_header Authorization $http_authorization;
+        proxy_set_header x-api-key $http_x_api_key;
+    }
 }
 ```
 
-## API Endpoints
+**Security Features**:
+- No hardcoded API keys
+- Header forwarding from client
+- Health check endpoint
+- Host header override for Claude API compatibility
 
-### Health & Monitoring
+## 🐳 Docker Integration
 
-| Endpoint | Port | Description |
-|----------|------|-------------|
-| `/health` | 8082 | Basic health check |
-| `/health/full` | 9090 | Full health with dependencies |
-| `/metrics` | 8082/9090 | Prometheus metrics |
-| `/nginx_status` | 8082 | Nginx stub status |
-
-### Proxied Services
-
-| Endpoint | Description | Rate Limit |
-|----------|-------------|------------|
-| `/v1/messages` | Claude API proxy | 10 req/s, burst 20 |
-| `/analyze` | AWS analysis proxy | 10 req/s, burst 10 |
-
-## Monitoring
-
-### Logs
-
-All logs are in JSON format for easy parsing:
-
-```bash
-# View access logs
-docker logs nginx-proxy | jq .
-
-# View specific endpoint logs
-docker exec nginx-proxy tail -f /var/log/nginx/claude-proxy-access.log | jq .
+### **Docker Compose Configuration**:
+```yaml
+nginx:
+  build:
+    context: ./nginx
+    dockerfile: Dockerfile           # Uses main Dockerfile
+  ports:  
+    - "${NGINX_PROXY_PORT:-8082}:8082"
+  volumes:
+    - ./logs/nginx:/var/log/nginx    # Log persistence
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
 ```
 
-### Metrics
+**Important Notes**:
+- Uses `Dockerfile` (not `Dockerfile.prod`)
+- Exposes port 8082 as main entry point
+- Health check on `/health` endpoint
+- Log persistence for monitoring
 
-Prometheus-compatible metrics available at `/metrics`:
+## 🚀 Operational Guidelines
 
-- `nginx_http_requests_total` - Total requests by status
-- `nginx_http_request_duration_seconds` - Request latency histogram
-- `nginx_up` - Nginx availability
-- `nginx_connections_current` - Current connections by state
-
-### Request Tracing
-
-Every request gets a unique ID for tracing:
-- Generated if not provided in `X-Request-ID` header
-- Forwarded to upstream services
-- Included in all log entries
-
-## Troubleshooting
-
-### Common Issues
-
-1. **502 Bad Gateway**
-   - Check if Kong is healthy: `curl http://localhost:8001/status`
-   - Verify network connectivity: `docker network inspect kong-net`
-
-2. **Rate Limiting (429)**
-   - Check current limits: `grep limit_req conf.d/claude-proxy.conf`
-   - Monitor rate limit hits in logs
-
-3. **Connection Refused**
-   - Verify Nginx is running: `docker ps | grep nginx-proxy`
-   - Check port binding: `netstat -tlnp | grep 8082`
-
-### Debug Commands
-
+### **Health Monitoring**:
 ```bash
-# Check Nginx configuration
-docker exec nginx-proxy nginx -t
+# Check nginx health
+curl http://localhost:8082/health
+# Expected: {"status":"healthy"}
+
+# Check Docker container status
+docker-compose ps nginx
+# Expected: healthy status
+
+# View nginx logs
+docker-compose logs nginx
+```
+
+### **Performance Metrics**:
+- **Target Response Time**: <100ms for proxy forwarding
+- **Concurrent Connections**: 1024 per worker process
+- **Worker Processes**: Auto-scaled to CPU cores
+- **Memory Usage**: ~10-20MB per worker
+
+### **Common Operations**:
+```bash
+# Restart nginx service
+docker-compose restart nginx
+
+# View access logs
+docker-compose exec nginx tail -f /var/log/nginx/access.log
 
 # View error logs
-docker exec nginx-proxy tail -f /var/log/nginx/error.log
+docker-compose exec nginx tail -f /var/log/nginx/error.log
 
-# Test upstream connectivity
-docker exec nginx-proxy curl -v http://kong:8000/status
-
-# Check resource usage
-docker stats nginx-proxy
+# Test configuration syntax
+docker-compose exec nginx nginx -t
 ```
 
-## Performance Tuning
+## 🔧 Configuration Dependencies
 
-### Worker Processes
-```nginx
-worker_processes auto;  # Uses CPU core count
-worker_rlimit_nofile 65535;  # Max file descriptors
+### **Environment Variables**:
+```bash
+# Set in .env file
+NGINX_PROXY_PORT=8082                    # Main proxy port
+NGINX_WORKER_PROCESSES=auto              # Worker scaling
+NGINX_WORKER_CONNECTIONS=1024            # Connection limit
 ```
 
-### Connection Handling
-```nginx
-events {
-    worker_connections 4096;  # Per worker
-    use epoll;  # Efficient on Linux
-    multi_accept on;  # Accept multiple connections
-}
+### **Network Dependencies**:
+- **Upstream**: kong:8010 (Kong Gateway internal)
+- **Downstream**: Client connections on port 8082
+- **Health Check**: Internal curl to localhost:8082/health
+
+### **Volume Mounts**:
+- **Logs**: `./logs/nginx:/var/log/nginx` (persistent logging)
+- **No Config Mounts**: All config built into image
+
+## 📊 API Key Security Comparison
+
+### **Before Security Fix** ❌:
+```
+Client Request → Nginx (adds hardcoded API key) → Kong → Claude API
+```
+**Risks**:
+- API key exposed in configuration files
+- Version control exposure
+- No key rotation capability
+- Security audit failures
+
+### **After Security Fix** ✅:
+```
+Client Request → Nginx (header passthrough) → Kong (env-based key injection) → Claude API
+```
+**Benefits**:
+- Zero hardcoded secrets
+- Environment-based key management
+- Easy key rotation
+- Audit compliance
+- Container security best practices
+
+## 🗂️ Archive Information
+
+### **Archived Files**:
+The `archive/` folder contains development files no longer in active use:
+
+**`Dockerfile.prod`** - Production-optimized Dockerfile
+- Multi-stage build with config validation
+- Security hardening with non-root user
+- Enhanced health checks and monitoring
+- **Status**: Complete but unused (development uses simpler Dockerfile)
+
+**`blue-green.conf`** - Blue-green deployment placeholder
+- Empty configuration file for future deployment strategy
+- **Status**: Placeholder only, no actual configuration
+
+### **Why Archived?**:
+- **Dockerfile.prod**: Over-engineered for current development needs
+- **blue-green.conf**: Feature not implemented, empty placeholder
+
+## 🚨 Security Best Practices
+
+### **Current Implementation**:
+✅ No hardcoded secrets in configuration  
+✅ Environment variable API key management  
+✅ Secure header forwarding  
+✅ Health check endpoints  
+✅ Structured logging  
+
+### **Recommendations**:
+- **SSL/TLS**: Consider adding HTTPS termination for production
+- **Rate Limiting**: Implement rate limiting in nginx for DDoS protection
+- **IP Filtering**: Add IP allowlist for restricted access
+- **Security Headers**: Add security headers (HSTS, CSP, etc.)
+
+## 🔄 Testing Guidelines
+
+### **Health Check Testing**:
+```bash
+# Basic health check
+curl -f http://localhost:8082/health
+
+# Expected response
+{"status":"healthy"}
 ```
 
-### Buffering
-```nginx
-proxy_buffering on;
-proxy_buffer_size 4k;
-proxy_buffers 8 4k;
-proxy_busy_buffers_size 8k;
+### **Proxy Functionality Testing**:
+```bash
+# Test proxy forwarding (requires Kong to be running)
+curl -X POST http://localhost:8082/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: test-key" \
+  -d '{"test": "data"}'
+
+# Should forward to Kong on port 8010
 ```
 
-## Security Best Practices
+### **Security Testing**:
+```bash
+# Verify no hardcoded API keys in config
+docker-compose exec nginx grep -r "sk-ant-api" /etc/nginx/
+# Expected: No matches (should be empty)
 
-1. **Headers**: All security headers are automatically added
-2. **Rate Limiting**: Protects backend services from abuse
-3. **Request Validation**: Size limits prevent DoS attacks
-4. **Error Handling**: Generic error messages prevent information leakage
-5. **Access Control**: Internal endpoints restricted by IP
-
-## Integration with CI/CD
-
-The Nginx proxy can be integrated into your deployment pipeline:
-
-```yaml
-# Example GitHub Actions step
-- name: Deploy Nginx Proxy
-  run: |
-    cd nginx
-    ./deploy.sh
-    ./test-nginx-proxy.sh
+# Check environment variable usage in Kong
+docker-compose exec kong env | grep ANTHROPIC_API_KEY
+# Expected: ANTHROPIC_API_KEY=sk-ant-api03-...
 ```
 
-## Maintenance
+### **Performance Testing**:
+```bash
+# Concurrent connection test
+ab -n 1000 -c 10 http://localhost:8082/health
 
-### Log Rotation
-
-Logs are automatically rotated by Docker:
-```yaml
-logging:
-  driver: json-file
-  options:
-    max-size: "10m"
-    max-file: "3"
+# Load test with Apache Bench
+ab -n 10000 -c 100 http://localhost:8082/health
 ```
 
-### Updates
+## 📈 Monitoring & Troubleshooting
 
-To update Nginx configuration:
-1. Modify configuration files
-2. Validate: `docker run --rm -v $PWD/nginx.conf:/etc/nginx/nginx.conf nginx:1.27-alpine nginx -t`
-3. Reload: `docker-compose -f docker-compose.nginx.yml restart`
+### **Log Analysis**:
+```bash
+# Access log format
+tail -f logs/nginx/access.log
+# Shows: IP, timestamp, request, status, bytes, user-agent
 
-### Backup
+# Error log monitoring
+tail -f logs/nginx/error.log
+# Shows: timestamps, error levels, detailed error messages
+```
 
-Important files to backup:
-- `nginx.conf` - Main configuration
-- `conf.d/*.conf` - Additional configurations
-- Docker volumes for logs (if needed)
+### **Common Issues**:
+
+**Connection Refused**:
+```bash
+# Check if Kong is running
+docker-compose ps kong
+# Ensure Kong is healthy before nginx starts
+```
+
+**504 Gateway Timeout**:
+```bash
+# Check Kong response time
+curl -w "%{time_total}" http://localhost:8010/health
+# Kong should respond within 5 seconds
+```
+
+**Health Check Failures**:
+```bash
+# Verify curl availability in container
+docker-compose exec nginx which curl
+# Ensure curl is installed in nginx container
+```
+
+## 🛠️ Development Workflow
+
+### **Configuration Changes**:
+1. **Edit Configuration**: Modify `nginx.conf` or `conf.d/claude-proxy.conf`
+2. **Test Syntax**: `docker-compose exec nginx nginx -t`
+3. **Restart Service**: `docker-compose restart nginx`
+4. **Verify Health**: `curl http://localhost:8082/health`
+
+### **Adding New Routes**:
+1. **Create Config**: Add new `.conf` file in `conf.d/`
+2. **Update Dockerfile**: Add COPY command for new config
+3. **Rebuild Image**: `docker-compose build nginx`
+4. **Test Configuration**: Verify routing works correctly
+
+### **Security Updates**:
+1. **Review Config**: Check for any hardcoded secrets
+2. **Environment Variables**: Use env vars for sensitive data
+3. **Test Security**: Verify no secrets in container
+4. **Document Changes**: Update this README with security notes
+
+---
+
+## 📞 Support
+
+For nginx-related issues:
+1. Check container health: `docker-compose ps nginx`
+2. Review logs: `docker-compose logs nginx`
+3. Test configuration: `docker-compose exec nginx nginx -t`
+4. Verify upstream connectivity: Test Kong Gateway health
+5. Consult Docker network settings in `docker-compose.yml`
+
+**Nginx Version**: 1.27-alpine  
+**Primary Function**: HTTP proxy and load balancer  
+**Security Level**: ✅ Hardcoded secrets removed, environment-based security

@@ -1,0 +1,219 @@
+# Day 4 Production Test Configurations
+# ElastiCache Integration Test Scenarios for Kong AWS-Masker Plugin
+# Covers EC2, EKS-EC2, EKS-Fargate, and ECS environments
+
+test_configurations:
+  # Traditional Redis Configuration (EC2, EKS-EC2)
+  traditional_redis_ec2:
+    environment: "EC2"
+    redis_type: "traditional"
+    redis_host: "redis-ec2-instance.internal"
+    redis_port: 6379
+    redis_database: 0
+    redis_password: "${REDIS_PASSWORD}"
+    use_ssl: false
+    connection_timeout: 2000
+    expected_latency_ms: 1.0
+    description: "Traditional Redis on EC2 instance"
+    
+  traditional_redis_eks_ec2:
+    environment: "EKS-EC2"
+    redis_type: "traditional"  
+    redis_host: "redis-service.redis-namespace.svc.cluster.local"
+    redis_port: 6379
+    redis_database: 0
+    redis_password: "${KUBERNETES_REDIS_PASSWORD}"
+    use_ssl: false
+    connection_timeout: 2000
+    expected_latency_ms: 1.2
+    description: "Traditional Redis in EKS on EC2 worker nodes"
+
+  # ElastiCache Configurations (EKS-Fargate, ECS)
+  elasticache_standalone_fargate:
+    environment: "EKS-Fargate"
+    redis_type: "managed"
+    redis_host: "aws-masker-cache.abc123.cache.amazonaws.com"
+    redis_port: 6379
+    redis_ssl_enabled: true
+    redis_ssl_verify: true
+    redis_auth_token: "${ELASTICACHE_AUTH_TOKEN}"
+    connection_timeout: 3000
+    ssl_handshake_timeout: 5000
+    expected_latency_ms: 2.0
+    description: "ElastiCache standalone with SSL in EKS-Fargate"
+    
+  elasticache_cluster_ecs:
+    environment: "ECS"
+    redis_type: "managed"
+    redis_host: "aws-masker-cluster.abc123.cache.amazonaws.com"
+    redis_port: 6379
+    redis_ssl_enabled: true
+    redis_ssl_verify: true
+    redis_auth_token: "${ELASTICACHE_CLUSTER_TOKEN}"
+    redis_user: "masker-service"
+    redis_cluster_mode: true
+    redis_cluster_endpoint: "aws-masker-cluster.abc123.cache.amazonaws.com"
+    connection_timeout: 3000
+    ssl_handshake_timeout: 5000
+    expected_latency_ms: 2.5
+    description: "ElastiCache cluster mode with RBAC in ECS"
+
+  # Development/Testing Configuration
+  elasticache_dev_ssl:
+    environment: "Development"
+    redis_type: "managed"
+    redis_host: "dev-elasticache.abc123.cache.amazonaws.com"
+    redis_port: 6379
+    redis_ssl_enabled: true
+    redis_ssl_verify: false  # Allow self-signed certs in dev
+    redis_auth_token: "${DEV_ELASTICACHE_TOKEN}"
+    connection_timeout: 2000
+    expected_latency_ms: 1.8
+    description: "Development ElastiCache with relaxed SSL"
+
+# Test Scenarios for Each Configuration
+test_scenarios:
+  connectivity_tests:
+    - name: "Connection Establishment"
+      description: "Verify Redis connection can be established"
+      timeout_ms: 5000
+      success_criteria: "Connection successful within timeout"
+      
+    - name: "Authentication Test"  
+      description: "Verify authentication works correctly"
+      timeout_ms: 3000
+      success_criteria: "Authentication successful"
+      
+    - name: "SSL Handshake Test"
+      description: "Verify SSL/TLS handshake for ElastiCache"
+      timeout_ms: 8000
+      success_criteria: "SSL handshake completes successfully"
+      applies_to: ["managed"]
+
+  performance_tests:
+    - name: "Latency Benchmark"
+      description: "Measure connection and operation latency"
+      iterations: 100
+      target_latency_ms: 2.0
+      success_criteria: "Average latency under target"
+      
+    - name: "Throughput Test"
+      description: "Measure operations per second"
+      duration_seconds: 30
+      target_ops_per_sec: 1000
+      success_criteria: "Throughput meets minimum requirement"
+      
+    - name: "Connection Pool Test"
+      description: "Verify connection pooling efficiency"
+      concurrent_connections: 50
+      success_criteria: "All connections handled successfully"
+
+  functionality_tests:
+    - name: "AWS Pattern Masking"
+      description: "Test masking of AWS resource patterns"
+      test_patterns:
+        - "i-0123456789abcdef0"
+        - "ami-0123456789abcdef0"  
+        - "sg-0123456789abcdef0"
+        - "my-test-bucket-12345"
+        - "10.0.1.100"
+      success_criteria: "All patterns masked successfully"
+      
+    - name: "Bidirectional Mapping"
+      description: "Test mask/unmask round-trip"
+      test_data: '{"resources": ["i-abc123", "my-bucket"], "description": "Test data"}'
+      success_criteria: "Original data recovered exactly"
+      
+    - name: "TTL Expiration"
+      description: "Test mapping expiration"
+      ttl_seconds: 10
+      success_criteria: "Mappings expire correctly"
+
+  failover_tests:
+    - name: "Connection Failure Handling"
+      description: "Test behavior when Redis is unavailable"
+      simulate_failure: true
+      success_criteria: "Fail-secure behavior activated"
+      
+    - name: "Authentication Failure"
+      description: "Test behavior with invalid credentials"
+      use_invalid_credentials: true
+      success_criteria: "Authentication failure detected and handled"
+      
+    - name: "SSL Certificate Validation"
+      description: "Test SSL certificate validation"
+      use_invalid_certificate: true
+      success_criteria: "Invalid certificate rejected"
+      applies_to: ["managed"]
+
+# Environment-Specific Settings
+environment_settings:
+  EC2:
+    network_latency_factor: 1.0
+    security_groups: ["sg-redis-access"]
+    vpc_endpoint_required: false
+    
+  EKS-EC2:
+    network_latency_factor: 1.2
+    kubernetes_service_mesh: true
+    pod_security_policy: "restricted"
+    
+  EKS-Fargate:
+    network_latency_factor: 1.5
+    fargate_platform_version: "1.4.0"
+    vpc_endpoint_required: true
+    elasticache_subnet_group: "private-subnets"
+    
+  ECS:
+    network_latency_factor: 1.3
+    task_definition_version: "latest"
+    vpc_endpoint_required: true
+    service_discovery: true
+
+# Success Criteria Thresholds
+success_criteria:
+  overall_success_rate: 95.0  # Minimum 95% of tests must pass
+  connectivity_success_rate: 100.0  # All connectivity tests must pass
+  performance_requirements:
+    max_avg_latency_ms: 2.0
+    min_throughput_ops_sec: 1000
+    max_connection_time_ms: 5000
+  security_requirements:
+    ssl_required_for_managed: true
+    auth_required_for_managed: true  
+    fail_secure_on_redis_down: true
+
+# Monitoring and Alerting Configuration
+monitoring:
+  metrics_collection: true
+  log_level: "INFO"
+  performance_tracking: true
+  error_threshold_notifications: true
+  
+  alert_conditions:
+    - condition: "connection_failure_rate > 5%"
+      severity: "WARNING"
+      
+    - condition: "avg_latency > 3ms"
+      severity: "WARNING"
+      
+    - condition: "ssl_handshake_failure_rate > 1%"
+      severity: "CRITICAL"
+      
+    - condition: "auth_failure_rate > 0.1%"
+      severity: "CRITICAL"
+
+# Test Execution Configuration
+execution_config:
+  parallel_execution: true
+  max_concurrent_tests: 4
+  test_timeout_seconds: 300
+  retry_failed_tests: 1
+  generate_detailed_report: true
+  
+  output_formats:
+    - json
+    - junit_xml
+    - markdown
+    
+  report_destination: "/tmp/day4_test_results"

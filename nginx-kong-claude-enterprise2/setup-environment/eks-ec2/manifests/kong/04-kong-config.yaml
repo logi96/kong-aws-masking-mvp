@@ -1,0 +1,186 @@
+# Kong Declarative Configuration with ElastiCache Plugin
+# Template configuration to be processed by init container
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-declarative-config
+  namespace: kong-aws-masking
+  labels:
+    app: kong-gateway
+    component: configuration
+    version: "v2.0.0-elasticache"
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    _transform: true
+    
+    # Claude API Service Configuration
+    services:
+      - name: claude-api-service
+        url: https://api.anthropic.com
+        protocol: https
+        host: api.anthropic.com
+        port: 443
+        path: /
+        connect_timeout: 10000
+        write_timeout: 30000
+        read_timeout: 30000
+        retries: 3
+        tags:
+          - claude-api
+          - production
+    
+    # Routes for Claude API
+    routes:
+      - name: claude-proxy-route
+        service: claude-api-service
+        paths:
+          - /v1
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+        strip_path: false
+        preserve_host: false
+        tags:
+          - claude-proxy
+          - api-route
+    
+    # AWS Masker ElastiCache Plugin Configuration
+    plugins:
+      - name: aws-masker
+        route: claude-proxy-route
+        enabled: true
+        config:
+          # ElastiCache Redis Configuration (replaced by init container)
+          elasticache_endpoint: "${ELASTICACHE_ENDPOINT}"
+          elasticache_port: ${ELASTICACHE_PORT}
+          elasticache_ssl_enabled: false  # LocalStack limitation
+          elasticache_ssl_verify: false
+          elasticache_cluster_mode: false
+          elasticache_database: 0
+          
+          # AWS Resource Masking Features
+          enabled: true
+          mask_ec2_instances: true
+          mask_s3_buckets: true
+          mask_rds_instances: true
+          mask_private_ips: true
+          mask_vpc_ids: true
+          mask_subnet_ids: true
+          mask_security_groups: true
+          
+          # Masking Behavior
+          preserve_structure: true
+          preserve_length: false
+          mask_type: "sequential"
+          log_masked_requests: false
+          
+          # Connection Settings
+          connection_pool_size: 100
+          connection_timeout: 2000
+          keepalive_timeout: 60000
+          socket_timeout: 5000
+          
+          # Failover and Reliability
+          enable_failover: true
+          max_retry_attempts: 3
+          retry_delay: 100
+          fail_secure: true
+          
+          # Data Management
+          mapping_ttl: 604800  # 7 days
+          max_entries: 10000
+          enable_compression: true
+          
+          # Phase 1 Success Version API Key Integration
+          anthropic_api_key: "${ANTHROPIC_API_KEY}"
+          
+          # Monitoring and Performance
+          enable_metrics: true
+          metrics_namespace: "aws_masker_elasticache"
+          enable_health_checks: true
+          
+          # AWS Integration
+          aws_region: "ap-northeast-2"
+          use_iam_auth: false
+          
+          # Development Settings (adjust for production)
+          debug_mode: true
+          test_mode: false
+        tags:
+          - aws-masker
+          - elasticache
+          - production
+---
+# Kong ElastiCache Plugin Files ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kong-elasticache-plugin
+  namespace: kong-aws-masking
+  labels:
+    app: kong-gateway
+    component: plugin
+    version: "aws-masker-elasticache-v2.0.0"
+data:
+  # Plugin files structure: aws-masker-elasticache/
+  # Note: In actual deployment, these would be loaded from the plugin directory
+  # This ConfigMap provides the plugin files structure for reference
+  
+  plugin-structure.txt: |
+    Kong AWS Masker ElastiCache Plugin Structure:
+    
+    /usr/local/kong/plugins/aws-masker-elasticache/
+    ├── handler.lua              # Main plugin handler (620+ lines)
+    ├── schema.lua               # Plugin schema configuration (75 lines)
+    ├── elasticache_client.lua   # ElastiCache Redis client (304+ lines)
+    ├── json_safe.lua           # Safe JSON encoding/decoding (38 lines)
+    └── error_codes.lua         # Error handling module (94 lines)
+    
+    Plugin Version: v2.0.0-elasticache
+    ElastiCache Integration: Full production support
+    Phase 1 Success Integration: API key Plugin Config approach
+    SSL/TLS Support: Production-ready with AUTH tokens
+    Failover Support: Automatic replica failover
+    Connection Pooling: High-performance connection management
+    
+  plugin-info.yaml: |
+    name: aws-masker-elasticache
+    version: "2.0.0"
+    description: "AWS resource masking plugin with ElastiCache Redis integration"
+    author: "Kong AWS Masking Enterprise Team"
+    license: "Enterprise"
+    
+    features:
+      - AWS resource pattern masking (50+ patterns)
+      - ElastiCache Redis integration with SSL/TLS
+      - Phase 1 success version API key handling
+      - Connection pooling and failover support
+      - Real-time health monitoring
+      - Performance metrics collection
+    
+    supported_aws_resources:
+      - EC2 instances (i-*)
+      - S3 buckets (various patterns)
+      - RDS instances (various patterns)
+      - VPC resources (vpc-*, subnet-*, sg-*)
+      - Private IP addresses (10.*.*.*, 172.16-31.*.*, 192.168.*.*)
+      - IAM credentials (AKIA*, ASIA*)
+    
+    dependencies:
+      - Kong Gateway 3.9.0.1+
+      - lua-resty-redis
+      - AWS ElastiCache Redis cluster
+      - cjson (JSON handling)
+    
+    configuration:
+      required:
+        - elasticache_endpoint
+      optional:
+        - elasticache_port (default: 6379)
+        - elasticache_ssl_enabled (default: true)
+        - anthropic_api_key (Phase 1 integration)
+        - mapping_ttl (default: 604800 seconds)

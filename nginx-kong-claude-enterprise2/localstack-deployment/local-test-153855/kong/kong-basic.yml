@@ -1,0 +1,15 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: claude-api-service
+    url: https://api.anthropic.com
+    protocol: https
+    host: api.anthropic.com
+    port: 443
+
+routes:
+  - name: claude-proxy-route
+    service: claude-api-service
+    paths:
+      - /v1

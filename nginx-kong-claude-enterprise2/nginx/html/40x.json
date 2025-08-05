@@ -1,7 +1,0 @@
-{
-  "error": {
-    "message": "The requested resource could not be found or you don't have permission to access it.",
-    "type": "client_error",
-    "code": "not_found_or_forbidden"
-  }
-}

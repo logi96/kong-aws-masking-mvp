@@ -1,0 +1,10 @@
+_format_version: "3.0"
+_transform: true
+
+services: []
+routes: []
+consumers: []
+plugins: []
+upstreams: []
+certificates: []
+snis: []

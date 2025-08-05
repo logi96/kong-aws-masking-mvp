@@ -1,0 +1,558 @@
+# Claude SDK Deployment for EKS Fargate
+# Interactive Claude Code SDK environment with proxy integration
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: claude-code-sdk-fargate
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: claude-code-sdk
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/version: "2.0.0"
+    app.kubernetes.io/component: claude-sdk
+    platform: eks-fargate
+    compute-type: fargate
+spec:
+  replicas: 1  # Single instance for interactive use
+  strategy:
+    type: Recreate  # Recreate for consistency
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: claude-code-sdk
+      platform: eks-fargate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: claude-code-sdk
+        app.kubernetes.io/part-of: kong-aws-masking-enterprise
+        app.kubernetes.io/version: "2.0.0"
+        app.kubernetes.io/component: claude-sdk
+        platform: eks-fargate
+        compute-type: fargate
+      annotations:
+        # Fargate-specific annotations
+        eks.amazonaws.com/fargate-profile: kong-aws-masking-profile
+        # Security annotations
+        container.apparmor.security.beta.kubernetes.io/claude-code-sdk: runtime/default
+    spec:
+      serviceAccountName: kong-aws-masking-fargate
+      
+      # Fargate-required security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534  # nobody user
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # DNS configuration
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
+      
+      # Init container for dependencies check
+      initContainers:
+      - name: wait-for-nginx
+        image: curlimages/curl:8.4.0
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        command: ['sh', '-c']
+        args:
+        - |
+          echo "Waiting for Nginx Proxy to be ready..."
+          until curl -f http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082/health; do
+            echo "Nginx Proxy not ready, waiting..."
+            sleep 5
+          done
+          echo "Nginx Proxy is ready!"
+          
+          echo "Waiting for Kong Gateway to be ready..."
+          until curl -f http://kong-gateway-service.kong-aws-masking.svc.cluster.local:8100/status; do
+            echo "Kong Gateway not ready, waiting..."
+            sleep 5
+          done
+          echo "Kong Gateway is ready!"
+          
+          echo "All dependencies are ready!"
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "64Mi"
+          limits:
+            cpu: "100m"
+            memory: "128Mi"
+        volumeMounts:
+        - name: tmp-init
+          mountPath: /tmp
+      
+      # Main containers
+      containers:
+      # Claude Code SDK container
+      - name: claude-code-sdk
+        image: node:20-alpine
+        imagePullPolicy: IfNotPresent
+        
+        # Fargate-required container security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        
+        # Fargate-compliant resource requirements (0.25 vCPU, 0.5GB)
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"
+        
+        # Keep container running for interactive use
+        command: ["sh", "-c"]
+        args:
+        - |
+          echo "Installing Claude Code SDK and dependencies..."
+          
+          # Install basic tools
+          apk add --no-cache curl wget bash git openssh-client
+          
+          # Install Claude Code SDK (latest version)
+          npm install -g @anthropic-ai/claude-code
+          
+          # Create working directory
+          mkdir -p /home/claude/{scripts,logs,tests}
+          
+          # Set permissions
+          chown -R 65534:65534 /home/claude
+          
+          # Create test scripts
+          cat > /home/claude/scripts/test-aws-masking.js << 'EOF'
+          #!/usr/bin/env node
+          
+          const https = require('https');
+          const http = require('http');
+          
+          // Configuration
+          const config = {
+            proxyUrl: 'http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082',
+            anthropicApiKey: process.env.ANTHROPIC_API_KEY || 'test-key-for-localstack',
+            testMessage: {
+              model: 'claude-3-5-sonnet-20241022',
+              max_tokens: 100,
+              messages: [{
+                role: 'user',
+                content: 'Analyze this AWS infrastructure: EC2 instance i-1234567890abcdef0, S3 bucket my-test-bucket-123, and RDS instance mydb.cluster-abc123.us-east-1.rds.amazonaws.com'
+              }]
+            }
+          };
+          
+          console.log('🚀 Testing AWS Masking through Kong Gateway...');
+          console.log('Proxy URL:', config.proxyUrl);
+          
+          // Test AWS masking
+          const testMasking = () => {
+            return new Promise((resolve, reject) => {
+              const postData = JSON.stringify(config.testMessage);
+              
+              const options = {
+                hostname: 'nginx-internal-service.kong-aws-masking.svc.cluster.local',
+                port: 8082,
+                path: '/v1/messages',
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(postData),
+                  'x-api-key': config.anthropicApiKey,
+                  'anthropic-version': '2023-06-01'
+                }
+              };
+              
+              const req = http.request(options, (res) => {
+                let data = '';
+                
+                res.on('data', (chunk) => {
+                  data += chunk;
+                });
+                
+                res.on('end', () => {
+                  try {
+                    const response = JSON.parse(data);
+                    console.log('✅ AWS Masking Test Result:');
+                    console.log('Status:', res.statusCode);
+                    console.log('Response:', JSON.stringify(response, null, 2));
+                    
+                    // Check if AWS resources were properly masked
+                    const responseText = JSON.stringify(response).toLowerCase();
+                    const hasMaskedResources = 
+                      responseText.includes('ec2_') || 
+                      responseText.includes('s3_') || 
+                      responseText.includes('rds_');
+                    
+                    if (hasMaskedResources) {
+                      console.log('🎉 SUCCESS: AWS resources appear to be masked!');
+                    } else {
+                      console.log('⚠️  WARNING: Could not detect masked AWS resources in response');
+                    }
+                    
+                    resolve(response);
+                  } catch (error) {
+                    console.error('❌ Error parsing response:', error.message);
+                    console.log('Raw response:', data);
+                    reject(error);
+                  }
+                });
+              });
+              
+              req.on('error', (error) => {
+                console.error('❌ Request error:', error.message);
+                reject(error);
+              });
+              
+              req.write(postData);
+              req.end();
+            });
+          };
+          
+          // Health check
+          const healthCheck = () => {
+            return new Promise((resolve, reject) => {
+              const options = {
+                hostname: 'nginx-internal-service.kong-aws-masking.svc.cluster.local',
+                port: 8082,
+                path: '/health',
+                method: 'GET'
+              };
+              
+              const req = http.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                  console.log('🏥 Health Check Result:', res.statusCode, data);
+                  resolve({ status: res.statusCode, data });
+                });
+              });
+              
+              req.on('error', reject);
+              req.end();
+            });
+          };
+          
+          // Main test execution
+          const main = async () => {
+            try {
+              console.log('🏥 Running health check...');
+              await healthCheck();
+              
+              console.log('🧪 Running AWS masking test...');
+              await testMasking();
+              
+              console.log('✅ All tests completed successfully!');
+            } catch (error) {
+              console.error('❌ Test failed:', error.message);
+              process.exit(1);
+            }
+          };
+          
+          if (require.main === module) {
+            main();
+          }
+          
+          module.exports = { testMasking, healthCheck };
+          EOF
+          
+          # Create health check script
+          cat > /home/claude/scripts/health-check.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "🏥 EKS-Fargate Health Check Starting..."
+          
+          # Check Nginx Proxy
+          echo "Checking Nginx Proxy..."
+          curl -f http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082/health || {
+            echo "❌ Nginx Proxy health check failed"
+            exit 1
+          }
+          echo "✅ Nginx Proxy is healthy"
+          
+          # Check Kong Gateway
+          echo "Checking Kong Gateway..."
+          curl -f http://kong-gateway-service.kong-aws-masking.svc.cluster.local:8100/status || {
+            echo "❌ Kong Gateway health check failed"
+            exit 1
+          }
+          echo "✅ Kong Gateway is healthy"
+          
+          # Check Backend API
+          echo "Checking Backend API..."
+          curl -f http://backend-api-service.kong-aws-masking.svc.cluster.local:3000/health || {
+            echo "❌ Backend API health check failed"
+            exit 1
+          }
+          echo "✅ Backend API is healthy"
+          
+          echo "🎉 All services are healthy!"
+          EOF
+          
+          # Make scripts executable
+          chmod +x /home/claude/scripts/*.sh
+          chmod +x /home/claude/scripts/*.js
+          
+          # Set ownership
+          chown -R 65534:65534 /home/claude
+          
+          echo "Claude Code SDK setup complete!"
+          echo "Available scripts:"
+          echo "- /home/claude/scripts/test-aws-masking.js"
+          echo "- /home/claude/scripts/health-check.sh"
+          
+          # Keep container running
+          tail -f /dev/null
+        
+        # Environment variables
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: TZ
+          value: "Asia/Seoul"
+        
+        # Claude API configuration (routed through proxy)
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+        - name: ANTHROPIC_BASE_URL
+          value: "http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082/v1"
+        - name: HTTP_PROXY
+          value: "http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082"
+        
+        # Service configuration
+        - name: NGINX_PROXY_URL
+          value: "http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082"
+        - name: KONG_ADMIN_URL
+          value: "http://kong-admin-service.kong-aws-masking.svc.cluster.local:8001"
+        - name: BACKEND_API_URL
+          value: "http://backend-api-service.kong-aws-masking.svc.cluster.local:3000"
+        
+        # Working directory
+        workingDir: /home/claude
+        
+        # Volume mounts for writable directories
+        volumeMounts:
+        - name: claude-home
+          mountPath: /home/claude
+        - name: claude-tmp
+          mountPath: /tmp
+        - name: node-cache
+          mountPath: /home/node/.npm
+        - name: app-cache
+          mountPath: /root/.cache  # For npm global installs
+        
+        # Health checks (basic liveness)
+        livenessProbe:
+          exec:
+            command:
+            - sh
+            - -c
+            - "ps aux | grep -v grep | grep tail"
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+      
+      # Volumes (EmptyDir for Fargate compatibility)
+      volumes:
+      # Writable volumes for readOnlyRootFilesystem
+      - name: claude-home
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: claude-tmp
+        emptyDir:
+          sizeLimit: 500Mi
+      - name: node-cache
+        emptyDir:
+          sizeLimit: 200Mi
+      - name: app-cache
+        emptyDir:
+          sizeLimit: 300Mi
+      - name: tmp-init
+        emptyDir:
+          sizeLimit: 50Mi
+      
+      # Pod-level constraints
+      terminationGracePeriodSeconds: 30
+      restartPolicy: Always
+      
+      # Node selection for Fargate
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        eks.amazonaws.com/compute-type: fargate
+      
+      # Tolerations for Fargate nodes
+      tolerations:
+      - key: eks.amazonaws.com/compute-type
+        operator: Equal
+        value: fargate
+        effect: NoSchedule
+
+---
+# Claude SDK Service (Internal only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: claude-code-sdk-service
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: claude-code-sdk
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: claude-sdk
+    platform: eks-fargate
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: claude-code-sdk
+    platform: eks-fargate
+  ports:
+  - name: ssh
+    port: 22
+    targetPort: 22
+    protocol: TCP
+
+---
+# Claude SDK Integration Test Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: claude-sdk-integration-test
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: claude-code-sdk
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: integration-test
+    platform: eks-fargate
+spec:
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: claude-code-sdk
+        app.kubernetes.io/part-of: kong-aws-masking-enterprise
+        app.kubernetes.io/component: integration-test
+        platform: eks-fargate
+        compute-type: fargate
+      annotations:
+        eks.amazonaws.com/fargate-profile: kong-aws-masking-profile
+    spec:
+      serviceAccountName: kong-aws-masking-fargate
+      restartPolicy: Never
+      
+      # Fargate-required security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      
+      containers:
+      - name: integration-test
+        image: curlimages/curl:8.4.0
+        imagePullPolicy: IfNotPresent
+        
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+        
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        
+        command: ["sh", "-c"]
+        args:
+        - |
+          echo "🧪 EKS-Fargate Integration Test Starting..."
+          
+          # Test Nginx Proxy
+          echo "Testing Nginx Proxy health..."
+          curl -f http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082/health || exit 1
+          echo "✅ Nginx Proxy is healthy"
+          
+          # Test Kong Gateway
+          echo "Testing Kong Gateway status..."
+          curl -f http://kong-gateway-service.kong-aws-masking.svc.cluster.local:8100/status || exit 1
+          echo "✅ Kong Gateway is healthy"
+          
+          # Test Backend API
+          echo "Testing Backend API health..."
+          curl -f http://backend-api-service.kong-aws-masking.svc.cluster.local:3000/health || exit 1
+          echo "✅ Backend API is healthy"
+          
+          # Test Claude SDK availability
+          echo "Testing Claude SDK deployment..."
+          kubectl get pods -l app.kubernetes.io/name=claude-code-sdk -n kong-aws-masking --no-headers | grep Running || {
+            echo "❌ Claude SDK pod is not running"
+            exit 1
+          }
+          echo "✅ Claude SDK is running"
+          
+          # Test proxy chain
+          echo "Testing proxy chain (simplified)..."
+          curl -s -o /dev/null -w "%{http_code}" http://nginx-internal-service.kong-aws-masking.svc.cluster.local:8082/health | grep -q "200" || exit 1
+          echo "✅ Proxy chain is responding"
+          
+          echo "🎉 All integration tests passed!"
+        
+        volumeMounts:
+        - name: test-tmp
+          mountPath: /tmp
+      
+      volumes:
+      - name: test-tmp
+        emptyDir:
+          sizeLimit: 50Mi
+      
+      # Node selection for Fargate
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        eks.amazonaws.com/compute-type: fargate
+      
+      tolerations:
+      - key: eks.amazonaws.com/compute-type
+        operator: Equal
+        value: fargate
+        effect: NoSchedule
+  
+  backoffLimit: 3
+  activeDeadlineSeconds: 300  # 5 minutes timeout

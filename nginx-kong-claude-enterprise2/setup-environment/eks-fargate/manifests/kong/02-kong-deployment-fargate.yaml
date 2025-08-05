@@ -1,0 +1,375 @@
+# Kong Gateway Deployment for EKS Fargate
+# Optimized for Fargate security contexts and resource requirements
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kong-gateway-fargate
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/version: "3.8.0"
+    app.kubernetes.io/component: api-gateway
+    platform: eks-fargate
+    compute-type: fargate
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kong-gateway
+      platform: eks-fargate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kong-gateway
+        app.kubernetes.io/part-of: kong-aws-masking-enterprise
+        app.kubernetes.io/version: "3.8.0"
+        app.kubernetes.io/component: api-gateway
+        platform: eks-fargate
+        compute-type: fargate
+      annotations:
+        # Fargate-specific annotations
+        eks.amazonaws.com/fargate-profile: kong-aws-masking-profile
+        # Security annotations
+        container.apparmor.security.beta.kubernetes.io/kong-gateway: runtime/default
+        # Prometheus scraping
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8100"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: kong-aws-masking-fargate
+      
+      # Fargate-required security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534  # nobody user
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      
+      # DNS configuration for better resolution
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+        - name: edns0
+      
+      # Container specifications
+      containers:
+      - name: kong-gateway
+        image: kong/kong-gateway:3.8.0-ubuntu
+        imagePullPolicy: IfNotPresent
+        
+        # Fargate-required container security context
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65534
+          runAsGroup: 65534
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          seccompProfile:
+            type: RuntimeDefault
+        
+        # Fargate-compliant resource requirements
+        resources:
+          requests:
+            # Fargate valid combination: 1 vCPU, 2GB
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "2"
+            memory: "4Gi"
+        
+        # Environment configuration
+        env:
+        # Kong core configuration
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_DECLARATIVE_CONFIG
+          value: "/usr/local/kong/declarative/kong.yml"
+        
+        # Network listeners
+        - name: KONG_PROXY_LISTEN
+          value: "0.0.0.0:8000"
+        - name: KONG_ADMIN_LISTEN
+          value: "0.0.0.0:8001"
+        - name: KONG_STATUS_LISTEN
+          value: "0.0.0.0:8100"
+        
+        # Plugin configuration
+        - name: KONG_PLUGINS
+          value: "bundled,aws-masker"
+        - name: KONG_LUA_PACKAGE_PATH
+          value: "/usr/local/share/lua/5.1/?.lua;/usr/local/share/lua/5.1/?/init.lua;/usr/local/kong/plugins/?.lua;/usr/local/kong/plugins/?/init.lua;;"
+        
+        # Performance tuning for Fargate
+        - name: KONG_NGINX_WORKER_PROCESSES
+          value: "2"  # Match CPU allocation
+        - name: KONG_NGINX_WORKER_CONNECTIONS
+          value: "1024"
+        - name: KONG_MEM_CACHE_SIZE
+          value: "1024m"  # 1GB cache
+        
+        # Logging configuration
+        - name: KONG_LOG_LEVEL
+          value: "info"
+        - name: KONG_ACCESS_LOG
+          value: "/tmp/kong-logs/access.log"
+        - name: KONG_ERROR_LOG
+          value: "/tmp/kong-logs/error.log"
+        - name: KONG_ADMIN_ACCESS_LOG
+          value: "/tmp/kong-logs/admin-access.log"
+        - name: KONG_ADMIN_ERROR_LOG
+          value: "/tmp/kong-logs/admin-error.log"
+        
+        # ElastiCache configuration
+        - name: ELASTICACHE_ENDPOINT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_ENDPOINT
+        - name: ELASTICACHE_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_PORT
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_ENDPOINT
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: elasticache-config
+              key: ELASTICACHE_PORT
+        
+        # Claude API configuration
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: kong-plugin-config
+              key: anthropic-api-key
+        
+        # Health check ports
+        ports:
+        - name: proxy
+          containerPort: 8000
+          protocol: TCP
+        - name: admin
+          containerPort: 8001
+          protocol: TCP
+        - name: status
+          containerPort: 8100
+          protocol: TCP
+        
+        # Volume mounts for writable directories (required for readOnlyRootFilesystem)
+        volumeMounts:
+        - name: kong-config
+          mountPath: /usr/local/kong/declarative
+          readOnly: true
+        - name: aws-masker-plugin
+          mountPath: /usr/local/kong/plugins/aws-masker
+          readOnly: true
+        - name: kong-tmp
+          mountPath: /tmp
+        - name: kong-logs
+          mountPath: /tmp/kong-logs
+        - name: kong-cache
+          mountPath: /usr/local/kong/logs
+        - name: kong-run
+          mountPath: /var/run/kong
+        
+        # Health checks
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: 8100
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: 8100
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        
+        # Startup probe for slower initialization
+        startupProbe:
+          httpGet:
+            path: /status
+            port: 8100
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 10
+      
+      # Volumes (EmptyDir for Fargate compatibility)
+      volumes:
+      - name: kong-config
+        configMap:
+          name: kong-declarative-config
+          defaultMode: 0644
+      - name: aws-masker-plugin
+        configMap:
+          name: kong-aws-masker-plugin
+          defaultMode: 0755
+      # Writable volumes for readOnlyRootFilesystem
+      - name: kong-tmp
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: kong-logs
+        emptyDir:
+          sizeLimit: 2Gi
+      - name: kong-cache
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: kong-run
+        emptyDir:
+          sizeLimit: 100Mi
+      
+      # Pod-level constraints
+      terminationGracePeriodSeconds: 30
+      restartPolicy: Always
+      
+      # Node selection for Fargate
+      nodeSelector:
+        kubernetes.io/arch: amd64
+        eks.amazonaws.com/compute-type: fargate
+      
+      # Tolerations for Fargate nodes
+      tolerations:
+      - key: eks.amazonaws.com/compute-type
+        operator: Equal
+        value: fargate
+        effect: NoSchedule
+
+---
+# Kong Gateway Service for Fargate
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-gateway-service
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: api-gateway
+    platform: eks-fargate
+  annotations:
+    # Service annotations for ALB
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+spec:
+  type: ClusterIP  # Internal service, accessed via Nginx
+  selector:
+    app.kubernetes.io/name: kong-gateway
+    platform: eks-fargate
+  ports:
+  - name: proxy
+    port: 8000
+    targetPort: 8000
+    protocol: TCP
+  - name: admin
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
+  - name: status
+    port: 8100
+    targetPort: 8100
+    protocol: TCP
+
+---
+# Kong Admin Service (Internal only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: kong-admin-service
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    app.kubernetes.io/component: api-gateway-admin
+    platform: eks-fargate
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kong-gateway
+    platform: eks-fargate
+  ports:
+  - name: admin
+    port: 8001
+    targetPort: 8001
+    protocol: TCP
+  - name: status
+    port: 8100
+    targetPort: 8100
+    protocol: TCP
+
+---
+# HorizontalPodAutoscaler for Kong Gateway
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kong-gateway-hpa
+  namespace: kong-aws-masking
+  labels:
+    app.kubernetes.io/name: kong-gateway
+    app.kubernetes.io/part-of: kong-aws-masking-enterprise
+    platform: eks-fargate
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: kong-gateway-fargate
+  minReplicas: 2
+  maxReplicas: 8  # Fargate scaling limit
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 60
