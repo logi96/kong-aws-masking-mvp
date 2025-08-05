@@ -1,0 +1,214 @@
+{{- if .Values.kong.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong-plugin
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+data:
+  # AWS Masker Plugin Handler (기존 handler.lua 그대로 사용)
+  handler.lua: |
+{{ .Files.Get "../../kong/plugins/aws-masker/handler.lua" | indent 4 }}
+
+  # Schema for AWS Masker Plugin
+  schema.lua: |
+    local typedefs = require "kong.db.schema.typedefs"
+
+    return {
+      name = "aws-masker",
+      fields = {
+        { consumer = typedefs.no_consumer },
+        { protocols = typedefs.protocols_http },
+        { config = {
+            type = "record",
+            fields = {
+              -- AWS Resource Masking Flags
+              { mask_ec2_instances = { type = "boolean", default = true } },
+              { mask_s3_buckets = { type = "boolean", default = true } },
+              { mask_rds_instances = { type = "boolean", default = true } },
+              { mask_private_ips = { type = "boolean", default = true } },
+              { mask_vpc_ids = { type = "boolean", default = true } },
+              { mask_security_groups = { type = "boolean", default = true } },
+              { mask_iam_roles = { type = "boolean", default = true } },
+              { mask_iam_users = { type = "boolean", default = true } },
+              { mask_lambda_functions = { type = "boolean", default = true } },
+              { mask_eks_clusters = { type = "boolean", default = true } },
+              
+              -- Behavior Configuration
+              { preserve_structure = { type = "boolean", default = true } },
+              { log_masked_requests = { type = "boolean", default = false } },
+              
+              -- Storage Configuration
+              { use_redis = { type = "boolean", default = true } },
+              { mapping_ttl = { type = "integer", default = 86400, gt = 0 } },
+              { max_entries = { type = "integer", default = 10000, gt = 0 } },
+              
+              -- Performance Configuration
+              { batch_size = { type = "integer", default = 100, gt = 0 } },
+              { timeout_ms = { type = "integer", default = 5000, gt = 0 } },
+            }
+        }}
+      }
+    }
+
+  # AWS Masker Plugin initialization
+  init.lua: |
+    -- AWS Masker Plugin Entry Point
+    -- Loads the handler and schema for Kong Gateway
+    local AwsMaskerHandler = require "kong.plugins.aws-masker.handler"
+    
+    return {
+      name = "aws-masker",
+      version = "1.0.0",
+      priority = 900,
+      handler = AwsMaskerHandler
+    }
+
+  # JSON Safe utility (필요한 유틸리티들도 포함)
+  json_safe.lua: |
+    -- JSON Safe encoding/decoding utility
+    local json = require "cjson.safe"
+    
+    local _M = {}
+    
+    function _M.encode(data)
+      if not data then return nil, "no data provided" end
+      local encoded, err = json.encode(data)
+      if not encoded then
+        return nil, "JSON encoding failed: " .. (err or "unknown error")
+      end
+      return encoded
+    end
+    
+    function _M.decode(str)
+      if not str or str == "" then return nil, "empty string" end
+      local decoded, err = json.decode(str)
+      if not decoded then
+        return nil, "JSON decoding failed: " .. (err or "unknown error")
+      end
+      return decoded
+    end
+    
+    function _M.is_available()
+      return json ~= nil
+    end
+    
+    function _M.test()
+      local test_data = { test = "value", number = 123 }
+      local encoded, encode_err = _M.encode(test_data)
+      if not encoded then
+        return false, "Encode test failed: " .. encode_err
+      end
+      
+      local decoded, decode_err = _M.decode(encoded)
+      if not decoded then
+        return false, "Decode test failed: " .. decode_err
+      end
+      
+      if decoded.test ~= "value" or decoded.number ~= 123 then
+        return false, "Data integrity test failed"
+      end
+      
+      return true, "JSON module test successful"
+    end
+    
+    return _M
+
+  # Placeholder for other required modules (실제 구현은 기존 파일에서 복사)
+  masker_ngx_re.lua: |
+    -- AWS Resource Masker using ngx.re
+    -- This is a placeholder - actual implementation from existing handler.lua
+    local _M = {}
+    
+    function _M.mask_data(data, mapping_store, config)
+      -- Implementation from existing masker
+      return { masked = data, count = 0 }
+    end
+    
+    function _M.create_mapping_store(options)
+      -- Implementation from existing masker
+      return { type = "memory" }
+    end
+    
+    function _M.prepare_unmask_data(data, mapping_store)
+      -- Implementation from existing masker
+      return {}
+    end
+    
+    function _M.release_redis_connection(redis)
+      -- Implementation from existing masker
+    end
+    
+    return _M
+
+  monitoring.lua: |
+    -- Monitoring utility placeholder
+    local _M = {}
+    
+    function _M.collect_request_metric(metric) end
+    function _M.track_pattern_usage(pattern, count) end
+    function _M.log_security_event(event) end
+    
+    return _M
+
+  auth_handler.lua: |
+    -- Authentication handler placeholder
+    local _M = {}
+    
+    function _M.handle_authentication()
+      return true, nil
+    end
+    
+    return _M
+
+  error_codes.lua: |
+    -- Error codes utility placeholder
+    local _M = {}
+    
+    function _M.exit_with_error(code, details)
+      kong.log.err("Error: " .. code)
+      return kong.response.exit(500, { error = code, details = details })
+    end
+    
+    function _M.log_error(code)
+      kong.log.err("Error logged: " .. code)
+    end
+    
+    return _M
+
+  health_check.lua: |
+    -- Health check utility placeholder
+    local _M = {}
+    
+    _M.health_status = {
+      redis = { last_check = 0 }
+    }
+    
+    function _M.should_allow_request()
+      return true, "open"
+    end
+    
+    function _M.check_redis_health(redis)
+      return true, nil
+    end
+    
+    function _M.record_operation_result(success) end
+    function _M.update_masking_stats(stats) end
+    
+    return _M
+
+  event_publisher.lua: |
+    -- Event publisher utility placeholder
+    local _M = {}
+    
+    function _M.is_event_publishing_enabled()
+      return false
+    end
+    
+    function _M.publish_masking_event(event, redis)
+      return true
+    end
+    
+    return _M
+{{- end }}

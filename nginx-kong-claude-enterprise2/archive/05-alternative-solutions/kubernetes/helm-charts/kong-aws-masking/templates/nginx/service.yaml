@@ -1,0 +1,24 @@
+{{- if .Values.nginx.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-nginx
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.nginx.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.nginx.service.type }}
+  ports:
+  - port: {{ .Values.nginx.service.port }}
+    targetPort: http
+    protocol: TCP
+    name: http
+  {{- if eq .Values.global.environment "localstack" }}
+  - port: 8080
+    targetPort: debug
+    protocol: TCP
+    name: debug
+  {{- end }}
+  selector:
+    {{- include "kong-aws-masking.nginx.selectorLabels" . | nindent 4 }}
+{{- end }}

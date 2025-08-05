@@ -1,0 +1,20 @@
+{
+  "alerts": [
+    {
+      "timestamp": "2025-07-30T00:08:03Z",
+      "type": "test",
+      "severity": "INFO",
+      "message": "Manual test alert",
+      "metric_value": "1",
+      "threshold": "0"
+    },
+    {
+      "timestamp": "2025-07-30T00:10:22Z",
+      "type": "test",
+      "severity": "INFO",
+      "message": "Manual test alert",
+      "metric_value": "1",
+      "threshold": "0"
+    }
+  ]
+}

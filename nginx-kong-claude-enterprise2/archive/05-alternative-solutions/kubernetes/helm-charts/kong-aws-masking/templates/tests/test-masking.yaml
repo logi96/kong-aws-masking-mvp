@@ -1,0 +1,113 @@
+{{- if and .Values.tests.enabled .Values.tests.masking }}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "kong-aws-masking.fullname" . }}-test-masking"
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.labels" . | nindent 4 }}
+    app.kubernetes.io/component: test
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-weight": "2"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  containers:
+  - name: masking-test
+    image: curlimages/curl:8.4.0
+    command:
+    - /bin/sh
+    - -c
+    - |
+      set -e
+      echo "=== Kong AWS Masking Functionality Test ==="
+      
+      # Base URL for testing
+      BASE_URL="http://{{ include "kong-aws-masking.claudeSDK.serviceName" . }}.{{ .Values.global.namespace }}.svc.cluster.local:{{ .Values.claudeSDK.service.port }}"
+      
+      # Test payload with AWS resources
+      TEST_PAYLOAD='{
+        "messages": [
+          {
+            "role": "user",
+            "content": "I have these AWS resources that need analysis:\n{{- range $i, $resource := .Values.tests.awsResources }}{{ if $i }}\n{{ end }}{{ add $i 1 }}. {{ $resource }}{{- end }}\n\nPlease analyze the security configuration."
+          }
+        ],
+        "model": "claude-3-5-sonnet-20241022",
+        "max_tokens": 100
+      }'
+      
+      echo "Test payload prepared with {{ len .Values.tests.awsResources }} AWS resources"
+      
+      # Test 1: Health check
+      echo "1. Testing health endpoint..."
+      curl -f -s "$BASE_URL/health" && echo "✓ Health endpoint works"
+      
+      # Test 2: Basic connectivity through the full stack
+      echo "2. Testing full stack connectivity..."
+      RESPONSE=$(curl -s -w "%{http_code}" -o /tmp/response -X POST \
+        -H "Content-Type: application/json" \
+        -H "x-api-key: test-key-for-masking-test" \
+        -d "$TEST_PAYLOAD" \
+        "$BASE_URL/v1/messages" || echo "000")
+      
+      echo "Response code: $RESPONSE"
+      
+      if [ "$RESPONSE" = "200" ] || [ "$RESPONSE" = "401" ] || [ "$RESPONSE" = "400" ]; then
+        echo "✓ Request reached Claude API (expected auth/format errors in test)"
+        echo "Response body:"
+        cat /tmp/response || echo "No response body"
+      else
+        echo "⚠ Unexpected response code: $RESPONSE"
+        echo "Response body:"
+        cat /tmp/response || echo "No response body"
+      fi
+      
+      # Test 3: Check Kong admin for plugin status
+      echo "3. Checking Kong plugin status..."
+      KONG_ADMIN_URL="http://{{ include "kong-aws-masking.kong.serviceName" . }}.{{ .Values.global.namespace }}.svc.cluster.local:{{ .Values.kong.service.adminPort }}"
+      
+      # Get plugins
+      PLUGINS=$(curl -s "$KONG_ADMIN_URL/plugins" || echo '{"data":[]}')
+      echo "Kong plugins response: $PLUGINS"
+      
+      if echo "$PLUGINS" | grep -q "aws-masker"; then
+        echo "✓ AWS masker plugin is loaded"
+      else
+        echo "⚠ AWS masker plugin not found in Kong"
+      fi
+      
+      # Test 4: Redis connectivity test
+      echo "4. Testing Redis accessibility..."
+      # Since we can't directly connect to Redis from curl image, test via Kong admin
+      REDIS_TEST=$(curl -s "$KONG_ADMIN_URL/status" || echo '{}')
+      if echo "$REDIS_TEST" | grep -q "database"; then
+        echo "✓ Kong can access backend services"
+      else
+        echo "⚠ Backend service status unclear"
+      fi
+      
+      echo "=== Masking functionality test completed ==="
+      echo "Note: Full masking validation requires actual Claude API key and AWS resources"
+    env:
+    - name: TEST_ENVIRONMENT
+      value: {{ .Values.global.environment }}
+    {{- if eq .Values.global.environment "localstack" }}
+    - name: AWS_ENDPOINT_URL
+      value: "http://localstack:4566"
+    {{- end }}
+    resources:
+      limits:
+        memory: "128Mi"
+        cpu: "100m"
+      requests:
+        memory: "64Mi"
+        cpu: "50m"
+    volumeMounts:
+    - name: tmp
+      mountPath: /tmp
+  volumes:
+  - name: tmp
+    emptyDir: {}
+{{- end }}

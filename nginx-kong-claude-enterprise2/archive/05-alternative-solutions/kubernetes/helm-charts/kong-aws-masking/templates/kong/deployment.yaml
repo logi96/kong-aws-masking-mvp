@@ -1,0 +1,181 @@
+{{- if .Values.kong.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.kong.replicas }}
+  selector:
+    matchLabels:
+      {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/kong/configmap.yaml") . | sha256sum }}
+        checksum/plugin: {{ include (print $.Template.BasePath "/kong/configmap-plugin.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+      # Wait for Redis to be ready
+      - name: wait-for-redis
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for Redis to be ready..."
+          until nc -z {{ include "kong-aws-masking.redis.host" . }} {{ .Values.redis.service.port }}; do
+            echo "Redis not ready, waiting..."
+            sleep 2
+          done
+          echo "Redis is ready!"
+      containers:
+      - name: kong
+        image: "{{ .Values.images.kong.repository }}:{{ .Values.images.kong.tag }}"
+        imagePullPolicy: {{ .Values.images.kong.pullPolicy }}
+        ports:
+        - name: proxy
+          containerPort: 8000
+          protocol: TCP
+        - name: proxy-ssl
+          containerPort: 8443
+          protocol: TCP
+        - name: admin
+          containerPort: 8001
+          protocol: TCP
+        - name: admin-ssl
+          containerPort: 8444
+          protocol: TCP
+        env:
+        {{- include "kong-aws-masking.commonEnv" . | nindent 8 }}
+        {{- include "kong-aws-masking.redis.env" . | nindent 8 }}
+        {{- include "kong-aws-masking.claude.env" . | nindent 8 }}
+        - name: KONG_DATABASE
+          value: "off"
+        - name: KONG_DECLARATIVE_CONFIG
+          value: "/usr/local/kong/declarative/kong.yml"
+        - name: KONG_PROXY_LISTEN
+          value: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+        - name: KONG_ADMIN_LISTEN
+          value: "0.0.0.0:8001, 0.0.0.0:8444 ssl"
+        - name: KONG_LOG_LEVEL
+          value: {{ .Values.kong.config.logLevel }}
+        - name: KONG_MEM_CACHE_SIZE
+          value: {{ .Values.kong.config.memCacheSize }}
+        - name: KONG_NGINX_WORKER_PROCESSES
+          value: "auto"
+        - name: KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE
+          value: "{{ .Values.performance.maxBodySize }}"
+        # Plugin path for AWS masker
+        - name: KONG_PLUGINS
+          value: "bundled,aws-masker"
+        - name: KONG_LUA_PACKAGE_PATH
+          value: "/usr/local/kong/plugins/?.lua;;"
+        {{- if eq .Values.global.environment "localstack" }}
+        # LocalStack-specific environment
+        - name: AWS_ENDPOINT_URL
+          value: "http://localstack:4566"
+        {{- end }}
+        resources:
+          {{- toYaml .Values.kong.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /status
+            port: admin
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /status
+            port: admin
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /status
+            port: admin
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 12
+        volumeMounts:
+        - name: kong-config
+          mountPath: /usr/local/kong/declarative
+        - name: kong-plugin
+          mountPath: /usr/local/kong/plugins/kong/plugins/aws-masker
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          runAsUser: 1000
+          runAsGroup: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: kong-config
+        configMap:
+          name: {{ include "kong-aws-masking.fullname" . }}-kong-config
+          items:
+          - key: kong.yml
+            path: kong.yml
+      - name: kong-plugin
+        configMap:
+          name: {{ include "kong-aws-masking.fullname" . }}-kong-plugin
+          defaultMode: 0755
+      - name: tmp
+        emptyDir: {}
+      securityContext:
+        fsGroup: 1000
+      {{- if .Values.ha.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - kong
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- if .Values.ha.topologySpreadConstraints }}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 12 }}
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 12 }}
+      {{- end }}
+  strategy:
+    type: {{ .Values.ha.updateStrategy.type }}
+    {{- if eq .Values.ha.updateStrategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxUnavailable: {{ .Values.ha.updateStrategy.maxUnavailable }}
+      maxSurge: {{ .Values.ha.updateStrategy.maxSurge }}
+    {{- end }}
+{{- end }}

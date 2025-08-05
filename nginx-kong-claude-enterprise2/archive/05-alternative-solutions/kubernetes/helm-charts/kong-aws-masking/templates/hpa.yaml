@@ -1,0 +1,101 @@
+{{- if .Values.autoscaling.enabled }}
+# HorizontalPodAutoscaler for Kong
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong-hpa
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "kong-aws-masking.fullname" . }}-kong
+  minReplicas: {{ .Values.autoscaling.kong.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.kong.maxReplicas }}
+  metrics:
+  {{- if .Values.autoscaling.kong.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.kong.targetCPUUtilizationPercentage }}
+  {{- end }}
+  {{- if .Values.autoscaling.kong.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.kong.targetMemoryUtilizationPercentage }}
+  {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+---
+# HorizontalPodAutoscaler for Nginx
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-nginx-hpa
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.nginx.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "kong-aws-masking.fullname" . }}-nginx
+  minReplicas: {{ .Values.autoscaling.nginx.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.nginx.maxReplicas }}
+  metrics:
+  {{- if .Values.autoscaling.nginx.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.nginx.targetCPUUtilizationPercentage }}
+  {{- end }}
+  {{- if .Values.autoscaling.nginx.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.autoscaling.nginx.targetMemoryUtilizationPercentage }}
+  {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 15
+      - type: Pods
+        value: 2
+        periodSeconds: 60
+      selectPolicy: Max
+{{- end }}

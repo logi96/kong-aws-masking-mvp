@@ -1,0 +1,102 @@
+# Docker Compose Override for Blue-Green Deployment
+# This file is used for zero-downtime deployments and rollback capability
+
+# Blue-Green deployment labels
+x-blue-green-labels: &blue-green-labels
+  com.claude.deployment.strategy: "blue-green"
+  com.claude.deployment.timestamp: "${DEPLOYMENT_TIMESTAMP}"
+  com.claude.deployment.version: "${DEPLOYMENT_VERSION}"
+
+services:
+  # Kong Blue instance (for zero-downtime deployment)
+  kong-blue:
+    extends:
+      file: docker-compose.prod.yml
+      service: kong
+    container_name: claude-kong-blue
+    networks:
+      claude-network:
+        aliases:
+          - kong-blue
+    labels:
+      <<: *blue-green-labels
+      com.claude.deployment.color: "blue"
+    profiles:
+      - blue-green
+
+  # Kong Green instance (for zero-downtime deployment)
+  kong-green:
+    extends:
+      file: docker-compose.prod.yml
+      service: kong
+    container_name: claude-kong-green
+    networks:
+      claude-network:
+        aliases:
+          - kong-green
+    labels:
+      <<: *blue-green-labels
+      com.claude.deployment.color: "green"
+    profiles:
+      - blue-green
+
+  # Nginx with enhanced configuration for blue-green deployment
+  nginx:
+    volumes:
+      - ./nginx/conf.d/blue-green.conf:/etc/nginx/conf.d/blue-green.conf:ro
+    environment:
+      - DEPLOYMENT_COLOR=${DEPLOYMENT_COLOR:-blue}
+      - ENABLE_RATE_LIMITING=${ENABLE_RATE_LIMITING:-true}
+      - RATE_LIMIT_REQUESTS=${RATE_LIMIT_REQUESTS:-100}
+      - RATE_LIMIT_BURST=${RATE_LIMIT_BURST:-20}
+
+  # Health check sidecar for deployment validation
+  health-checker:
+    image: curlimages/curl:8.11.0
+    container_name: claude-health-checker
+    depends_on:
+      - nginx
+      - kong
+      - redis
+    networks:
+      - claude-network
+    volumes:
+      - ./scripts/health-check-deployment.sh:/health-check.sh:ro
+    environment:
+      - HEALTH_CHECK_INTERVAL=${HEALTH_CHECK_INTERVAL:-10}
+      - HEALTH_CHECK_RETRIES=${HEALTH_CHECK_RETRIES:-5}
+      - DEPLOYMENT_VERSION=${DEPLOYMENT_VERSION}
+    command: sh -c "while true; do /health-check.sh; sleep $${HEALTH_CHECK_INTERVAL}; done"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
+    restart: unless-stopped
+    profiles:
+      - deployment
+
+  # Rollback coordinator
+  rollback-coordinator:
+    image: alpine:3.20
+    container_name: claude-rollback-coordinator
+    networks:
+      - claude-network
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./scripts/rollback-controller.sh:/rollback-controller.sh:ro
+      - ./deployments:/deployments
+    environment:
+      - ROLLBACK_THRESHOLD_ERROR_RATE=${ROLLBACK_THRESHOLD_ERROR_RATE:-5}
+      - ROLLBACK_THRESHOLD_RESPONSE_TIME=${ROLLBACK_THRESHOLD_RESPONSE_TIME:-5000}
+      - ROLLBACK_CHECK_INTERVAL=${ROLLBACK_CHECK_INTERVAL:-30}
+      - DEPLOYMENT_VERSION=${DEPLOYMENT_VERSION}
+    command: /rollback-controller.sh
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+    restart: unless-stopped
+    profiles:
+      - deployment

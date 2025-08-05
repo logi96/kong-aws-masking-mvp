@@ -1,0 +1,49 @@
+services:
+  # LocalStack Pro - AWS 서비스 에뮬레이션
+  localstack:
+    image: localstack/localstack-pro:latest
+    container_name: claude-localstack
+    environment:
+      - LOCALSTACK_AUTH_TOKEN=ls-jiTEfoso-4663-VECu-pATe-SoZa383214bb
+      - SERVICES=ec2,ecs,eks,cloudformation,iam,s3,logs,cloudwatch,elbv2,route53,elasticache
+      - DEBUG=0
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - claude-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # AWS CLI 컨테이너 - LocalStack과 상호작용용
+  aws-cli:
+    image: amazon/aws-cli:latest
+    container_name: claude-aws-cli
+    depends_on:
+      localstack:
+        condition: service_healthy
+    environment:
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - AWS_DEFAULT_REGION=us-east-1
+      - AWS_ENDPOINT_URL=http://localstack:4566
+    networks:
+      - claude-network
+    volumes:
+      - "./aws-scripts:/aws-scripts"
+      - "./terraform:/terraform"
+    entrypoint: ["tail", "-f", "/dev/null"]
+    restart: unless-stopped
+
+networks:
+  claude-network:
+    name: ${NETWORK_NAME:-claude-enterprise}
+    driver: bridge
+    external: true
+

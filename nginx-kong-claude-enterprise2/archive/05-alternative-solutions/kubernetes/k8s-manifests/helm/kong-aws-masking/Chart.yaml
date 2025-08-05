@@ -1,0 +1,25 @@
+apiVersion: v2
+name: kong-aws-masking
+description: Kong AWS Masking Enterprise 2 - Kubernetes/EKS Deployment
+type: application
+version: 1.0.0
+appVersion: "3.9.0"
+home: https://github.com/Kong/kong
+sources:
+  - https://github.com/Kong/kong
+keywords:
+  - kong
+  - api-gateway
+  - aws-masking
+  - microservices
+  - kubernetes
+maintainers:
+  - name: Kong AWS Masking Team
+    email: team@kong-aws-masking.com
+annotations:
+  category: Infrastructure
+dependencies:
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled

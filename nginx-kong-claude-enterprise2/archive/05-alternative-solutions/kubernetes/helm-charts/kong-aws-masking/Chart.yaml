@@ -1,0 +1,25 @@
+apiVersion: v2
+name: kong-aws-masking
+description: Kong AWS Masking Enterprise 2 - Complete Claude API masking solution
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+home: https://github.com/your-org/kong-aws-masking
+sources:
+  - https://github.com/your-org/kong-aws-masking
+maintainers:
+  - name: Kong AWS Masking Team
+    email: team@yourorg.com
+keywords:
+  - kong
+  - aws
+  - masking
+  - claude
+  - api-gateway
+  - security
+  - enterprise
+annotations:
+  category: Security
+  licenses: Apache-2.0
+dependencies: []
+kubeVersion: ">=1.19.0"

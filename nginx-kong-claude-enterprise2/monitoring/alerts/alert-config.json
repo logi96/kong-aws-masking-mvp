@@ -1,0 +1,18 @@
+{
+    "alert_thresholds": {
+        "aws_masking_failure_rate": 10,
+        "response_time_p95_ms": 5000,
+        "response_time_p99_ms": 10000,
+        "redis_memory_bytes": 104857600,
+        "kong_plugin_errors": 5,
+        "system_cpu_percent": 80,
+        "system_memory_percent": 80
+    },
+    "alert_cooldown_minutes": 15,
+    "notification_channels": {
+        "log": true,
+        "system_logger": true,
+        "file": true
+    },
+    "enabled": true
+}

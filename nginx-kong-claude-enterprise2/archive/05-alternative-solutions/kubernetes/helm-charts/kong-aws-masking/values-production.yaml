@@ -1,0 +1,258 @@
+# Production values for kong-aws-masking
+# Override default values for production AWS EKS environment
+
+global:
+  namespace: claude-enterprise
+  environment: production
+  region: ap-northeast-2
+  timezone: "Asia/Seoul"
+
+# Production-grade image configurations
+images:
+  kong:
+    repository: kong
+    tag: "3.9.0-ubuntu"
+    pullPolicy: Always
+  nginx:
+    repository: nginx
+    tag: "1.24-alpine"
+    pullPolicy: Always
+  redis:
+    repository: redis
+    tag: "7.2-alpine"
+    pullPolicy: Always
+
+# Redis for Production (high availability)
+redis:
+  enabled: true
+  replicas: 1
+  persistence:
+    enabled: true
+    storageClass: "gp3"
+    size: 20Gi  # Larger storage for production
+    accessMode: ReadWriteOnce
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  service:
+    name: redis
+    port: 6379
+    type: ClusterIP
+  config:
+    password: "${REDIS_PASSWORD}"  # From external secret manager
+    database: 0
+    maxConnections: 200
+  backup:
+    enabled: true
+    schedule: "0 2 * * *"  # Daily at 2 AM
+    retention: 7
+
+# Kong for Production (high availability)
+kong:
+  enabled: true
+  replicas: 3  # Multiple replicas for HA
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "4Gi"
+      cpu: "2000m"
+  service:
+    name: kong
+    port: 8010
+    adminPort: 8001
+    type: ClusterIP
+  config:
+    database: "off"
+    logLevel: "info"
+    memoryLimit: "4G"
+    memCacheSize: "2048m"
+  awsMasker:
+    mappingTtl: 604800  # 7 days for production
+    maxEntries: 50000   # Higher capacity
+
+# Nginx for Production (high availability)
+nginx:
+  enabled: true
+  replicas: 3  # Multiple replicas for HA
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+  config:
+    workerProcesses: "auto"
+    workerConnections: 2048  # Higher connections
+    proxyTimeout: 60
+    clientMaxBodySize: "50m"  # Larger body size
+
+# Claude SDK Service (Application Load Balancer)  
+claudeSDK:
+  enabled: true
+  service:
+    name: claude-sdk
+    port: 8085
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+      service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "tcp"
+      service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+      service.beta.kubernetes.io/aws-load-balancer-subnets: "subnet-xxx,subnet-yyy"
+
+# Secrets from AWS Secrets Manager / Parameter Store
+secrets:
+  claude:
+    apiKey: "${CLAUDE_API_KEY}"
+  aws:
+    accessKeyId: "${AWS_ACCESS_KEY_ID}"
+    secretAccessKey: "${AWS_SECRET_ACCESS_KEY}"
+    region: "ap-northeast-2"
+  redis:
+    password: "${REDIS_PASSWORD}"
+
+# Production Security
+security:
+  enableRateLimiting: true
+  rateLimitMinute: 100   # Stricter limits
+  rateLimitHour: 2000
+  enableBotDetection: true
+  enableIpRestriction: true
+  allowedIPs:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  networkPolicies:
+    enabled: true
+    allowFromNamespaces:
+      - "monitoring"
+      - "logging"
+
+# Production Monitoring
+monitoring:
+  enabled: true
+  healthCheck: true
+  kongEvents: true
+  publishEvents: true
+  eventChannel: "aws-masking-events-prod"
+  metrics:
+    enabled: true
+    path: "/metrics"
+    port: 9090
+    serviceMonitor:
+      enabled: true
+      interval: "30s"
+      path: "/metrics"
+  alerts:
+    enabled: true
+    rules:
+      - alert: "HighErrorRate"
+        expr: "rate(kong_http_status{code=~'5..'}[5m]) > 0.1"
+        for: "2m"
+      - alert: "HighLatency"
+        expr: "histogram_quantile(0.95, kong_latency_bucket) > 5000"
+        for: "5m"
+
+# Production Performance
+performance:
+  maxBodySize: 52428800  # 50MB for production
+  cacheSize: 50000
+  workerPoolSize: 8
+  batchSize: 500
+  timeouts:
+    api: 120000     # 2 minutes
+    connect: 10000  # 10 seconds
+    write: 120000   # 2 minutes  
+    read: 120000    # 2 minutes
+
+# Production Logging
+logging:
+  level: "info"
+  maskedRequests: false  # Disabled for security
+  directory: "/var/log"
+  retentionDays: 90      # Longer retention
+  debug: false
+  verbose: false
+  structured: true       # JSON formatted logs
+  audit: true           # Enable audit logging
+
+# High Availability (enabled)
+ha:
+  enabled: true
+  podAntiAffinity: true
+  topologySpreadConstraints: true
+  updateStrategy:
+    type: RollingUpdate
+    maxUnavailable: 1
+    maxSurge: 1
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# Production Ingress (ALB)
+ingress:
+  enabled: true
+  className: "alb"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-northeast-2:ACCOUNT:certificate/CERT-ID"
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
+    alb.ingress.kubernetes.io/healthcheck-path: "/health"
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: '30'
+    alb.ingress.kubernetes.io/healthy-threshold-count: '2'
+    alb.ingress.kubernetes.io/unhealthy-threshold-count: '3'
+  hosts:
+    - host: kong-masking.your-domain.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: claude-sdk
+              port:
+                number: 8085
+  tls:
+    - secretName: kong-masking-tls
+      hosts:
+        - kong-masking.your-domain.com
+
+# Production Autoscaling
+autoscaling:
+  enabled: true
+  kong:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  nginx:
+    minReplicas: 3
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 70
+
+# Backup and Disaster Recovery
+backup:
+  enabled: true
+  redis:
+    schedule: "0 2,14 * * *"  # Twice daily
+    retention: 30
+    storage: "s3://your-backup-bucket/redis-backups"
+  config:
+    schedule: "0 1 * * *"     # Daily
+    retention: 90
+    storage: "s3://your-backup-bucket/config-backups"
+
+# Test configuration (minimal for production)
+tests:
+  enabled: false  # Disabled in production
+  connectivity: false
+  masking: false

@@ -1,0 +1,37 @@
+{{- if and .Values.ha.enabled .Values.ha.podDisruptionBudget.enabled }}
+# PodDisruptionBudget for Kong
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong-pdb
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.ha.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.ha.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 6 }}
+---
+# PodDisruptionBudget for Nginx
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-nginx-pdb
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.nginx.labels" . | nindent 4 }}
+spec:
+  {{- if .Values.ha.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ .Values.ha.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  minAvailable: 1
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "kong-aws-masking.nginx.selectorLabels" . | nindent 6 }}
+{{- end }}

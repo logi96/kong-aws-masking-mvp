@@ -1,0 +1,223 @@
+# Default values for kong-aws-masking
+# This is a YAML-formatted file.
+
+global:
+  namespace: claude-enterprise
+  environment: development
+  region: ap-northeast-2
+  timezone: "Asia/Seoul"
+
+# Image registry and tags
+images:
+  kong:
+    repository: kong
+    tag: "3.9.0-ubuntu"
+    pullPolicy: IfNotPresent
+  nginx:
+    repository: nginx
+    tag: "1.24-alpine"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: "7.2-alpine"
+    pullPolicy: IfNotPresent
+
+# Redis Configuration
+redis:
+  enabled: true
+  replicas: 1
+  persistence:
+    enabled: true
+    storageClass: "gp3"
+    size: 10Gi
+    accessMode: ReadWriteOnce
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "200m"
+  service:
+    name: redis
+    port: 6379
+    type: ClusterIP
+  config:
+    password: "secure-redis-password-change-me"
+    database: 0
+    maxConnections: 100
+
+# Kong Configuration
+kong:
+  enabled: true
+  replicas: 2
+  image:
+    repository: kong
+    tag: "3.9.0-ubuntu"
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "200m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+  service:
+    name: kong
+    port: 8010
+    adminPort: 8001
+    type: ClusterIP
+  config:
+    database: "off"
+    logLevel: "info"
+    memoryLimit: "4G"
+    memCacheSize: "2048m"
+    declarativeConfig: "/usr/local/kong/declarative/kong.yml"
+  awsMasker:
+    # AWS Masking Features
+    maskEc2Instances: true
+    maskS3Buckets: true
+    maskRdsInstances: true
+    maskPrivateIps: true
+    maskVpcIds: true
+    maskSecurityGroups: true
+    maskIamRoles: true
+    maskIamUsers: true
+    maskLambdaFunctions: true
+    maskEksClusters: true
+    # Behavior
+    preserveStructure: true
+    logMaskedRequests: true
+    useRedis: true
+    mappingTtl: 86400  # 24 hours
+    maxEntries: 10000
+
+# Nginx Configuration
+nginx:
+  enabled: true
+  replicas: 2
+  image:
+    repository: nginx
+    tag: "1.24-alpine"
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "200m"
+  service:
+    name: nginx
+    port: 8082
+    type: ClusterIP
+  config:
+    workerProcesses: "auto"
+    workerConnections: 1024
+    proxyTimeout: 60
+    clientMaxBodySize: "10m"
+
+# Claude Code SDK Service
+claudeSDK:
+  enabled: true
+  service:
+    name: claude-sdk
+    port: 8085
+    type: LoadBalancer
+    annotations:
+      service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+      service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+
+# Secret Management
+secrets:
+  claude:
+    apiKey: "sk-ant-api03-YOUR-KEY-HERE"
+  aws:
+    accessKeyId: "your-access-key-id"
+    secretAccessKey: "your-secret-access-key"
+    region: "ap-northeast-2"
+  redis:
+    password: "your-secure-redis-password-here"
+
+# Security Settings
+security:
+  enableRateLimiting: true
+  rateLimitMinute: 60
+  rateLimitHour: 1000
+  enableBotDetection: true
+  enableIpRestriction: false
+  networkPolicies:
+    enabled: true
+    allowFromNamespaces: []
+
+# Monitoring & Observability
+monitoring:
+  enabled: true
+  healthCheck: true
+  kongEvents: true
+  publishEvents: true
+  eventChannel: "aws-masking-events"
+  metrics:
+    enabled: true
+    path: "/metrics"
+    port: 9090
+
+# Performance Tuning
+performance:
+  maxBodySize: 10485760  # 10MB
+  cacheSize: 10000
+  workerPoolSize: 4
+  batchSize: 100
+  timeouts:
+    api: 60000
+    connect: 5000
+    write: 60000
+    read: 60000
+
+# Logging
+logging:
+  level: "info"
+  maskedRequests: true
+  directory: "/var/log"
+  retentionDays: 30
+  debug: false
+  verbose: false
+
+# High Availability
+ha:
+  enabled: true
+  podAntiAffinity: true
+  topologySpreadConstraints: true
+  updateStrategy:
+    type: RollingUpdate
+    maxUnavailable: 1
+    maxSurge: 1
+
+# Ingress (Optional - ALB)
+ingress:
+  enabled: false
+  className: "alb"
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+  hosts:
+    - host: kong-masking.your-domain.com
+      paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: claude-sdk
+              port:
+                number: 8085
+
+# Test Configuration
+tests:
+  enabled: true
+  connectivity: true
+  masking: true
+  awsResources:
+    - "i-1234567890abcdef0"
+    - "my-production-bucket-2024"
+    - "10.0.1.100"
+    - "vpc-12345678"
+    - "mydb.cluster-xyz.us-east-1.rds.amazonaws.com"

@@ -1,0 +1,181 @@
+{{- if .Values.nginx.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-nginx
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.nginx.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.nginx.replicas }}
+  selector:
+    matchLabels:
+      {{- include "kong-aws-masking.nginx.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kong-aws-masking.nginx.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/nginx/configmap.yaml") . | sha256sum }}
+    spec:
+      initContainers:
+      # Wait for Kong to be ready
+      - name: wait-for-kong
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for Kong to be ready..."
+          until nc -z {{ include "kong-aws-masking.kong.serviceName" . }}.{{ .Values.global.namespace }}.svc.cluster.local {{ .Values.kong.service.port }}; do
+            echo "Kong not ready, waiting..."
+            sleep 2
+          done
+          echo "Kong is ready!"
+      
+      # Inject Claude API key into nginx config
+      - name: setup-api-key
+        image: busybox:1.35
+        command:
+        - sh
+        - -c
+        - |
+          echo "Setting up Claude API key..."
+          # Create a file with the API key that nginx can read
+          echo "set \$claude_api_key \"$CLAUDE_API_KEY\";" > /tmp/nginx-vars/api-key.conf
+          echo "API key setup completed"
+        env:
+        {{- include "kong-aws-masking.claude.env" . | nindent 8 }}
+        volumeMounts:
+        - name: nginx-vars
+          mountPath: /tmp/nginx-vars
+      
+      containers:
+      - name: nginx
+        image: "{{ .Values.images.nginx.repository }}:{{ .Values.images.nginx.tag }}"
+        imagePullPolicy: {{ .Values.images.nginx.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: {{ .Values.nginx.service.port }}
+          protocol: TCP
+        {{- if eq .Values.global.environment "localstack" }}
+        - name: debug
+          containerPort: 8080
+          protocol: TCP
+        {{- end }}
+        env:
+        {{- include "kong-aws-masking.commonEnv" . | nindent 8 }}
+        {{- include "kong-aws-masking.claude.env" . | nindent 8 }}
+        - name: KONG_SERVICE
+          value: "{{ include "kong-aws-masking.kong.serviceName" . }}.{{ .Values.global.namespace }}.svc.cluster.local"
+        - name: KONG_PORT
+          value: "{{ .Values.kong.service.port }}"
+        resources:
+          {{- toYaml .Values.nginx.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 6
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/nginx.conf
+          subPath: nginx.conf
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d/claude-api.conf
+          subPath: claude-api.conf
+        - name: nginx-vars
+          mountPath: /etc/nginx/conf.d/api-key.conf
+          subPath: api-key.conf
+        - name: tmp
+          mountPath: /tmp
+        - name: cache
+          mountPath: /var/cache/nginx
+        - name: run
+          mountPath: /var/run
+        securityContext:
+          runAsUser: 101
+          runAsGroup: 101
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+            add:
+            - NET_BIND_SERVICE
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: {{ include "kong-aws-masking.fullname" . }}-nginx-config
+      - name: nginx-vars
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+      - name: cache
+        emptyDir: {}
+      - name: run
+        emptyDir: {}
+      securityContext:
+        fsGroup: 101
+      {{- if .Values.ha.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - nginx
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+      {{- if .Values.ha.topologySpreadConstraints }}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            {{- include "kong-aws-masking.nginx.selectorLabels" . | nindent 12 }}
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            {{- include "kong-aws-masking.nginx.selectorLabels" . | nindent 12 }}
+      {{- end }}
+  strategy:
+    type: {{ .Values.ha.updateStrategy.type }}
+    {{- if eq .Values.ha.updateStrategy.type "RollingUpdate" }}
+    rollingUpdate:
+      maxUnavailable: {{ .Values.ha.updateStrategy.maxUnavailable }}
+      maxSurge: {{ .Values.ha.updateStrategy.maxSurge }}
+    {{- end }}
+{{- end }}

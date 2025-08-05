@@ -1,0 +1,168 @@
+{{- if .Values.kong.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+data:
+  kong.yml: |
+    _format_version: "3.0"
+    _transform: true
+
+    services:
+      - name: claude-api-service
+        url: https://api.anthropic.com
+        protocol: https
+        host: api.anthropic.com
+        port: 443
+        retries: 3
+        connect_timeout: {{ .Values.performance.timeouts.connect }}
+        write_timeout: {{ .Values.performance.timeouts.write }}
+        read_timeout: {{ .Values.performance.timeouts.read }}
+        tags:
+          - claude
+          - {{ .Values.global.environment }}
+
+    routes:
+      - name: claude-proxy-route
+        service: claude-api-service
+        paths:
+          - /v1
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+        strip_path: false
+        preserve_host: false
+        regex_priority: 0
+        tags:
+          - claude
+          - proxy
+
+    plugins:
+      - name: aws-masker
+        route: claude-proxy-route
+        config:
+          # AWS Masking Features (from values.yaml)
+          mask_ec2_instances: {{ .Values.kong.awsMasker.maskEc2Instances }}
+          mask_s3_buckets: {{ .Values.kong.awsMasker.maskS3Buckets }}
+          mask_rds_instances: {{ .Values.kong.awsMasker.maskRdsInstances }}
+          mask_private_ips: {{ .Values.kong.awsMasker.maskPrivateIps }}
+          mask_vpc_ids: {{ .Values.kong.awsMasker.maskVpcIds }}
+          mask_security_groups: {{ .Values.kong.awsMasker.maskSecurityGroups }}
+          mask_iam_roles: {{ .Values.kong.awsMasker.maskIamRoles }}
+          mask_iam_users: {{ .Values.kong.awsMasker.maskIamUsers }}
+          mask_lambda_functions: {{ .Values.kong.awsMasker.maskLambdaFunctions }}
+          mask_eks_clusters: {{ .Values.kong.awsMasker.maskEksClusters }}
+          
+          # Behavior configuration
+          preserve_structure: {{ .Values.kong.awsMasker.preserveStructure }}
+          log_masked_requests: {{ .Values.kong.awsMasker.logMaskedRequests }}
+          
+          # Redis storage configuration
+          use_redis: {{ .Values.kong.awsMasker.useRedis }}
+          mapping_ttl: {{ .Values.kong.awsMasker.mappingTtl }}
+          max_entries: {{ .Values.kong.awsMasker.maxEntries }}
+        tags:
+          - security
+          - masking
+
+      - name: correlation-id
+        config:
+          header_name: X-Correlation-ID
+          generator: uuid
+          echo_downstream: true
+        tags:
+          - observability
+
+      - name: request-transformer
+        route: claude-proxy-route
+        config:
+          add:
+            headers:
+              - "anthropic-version:2023-06-01"
+          remove:
+            headers:
+              - "X-Real-IP"
+              - "X-Forwarded-For"
+        tags:
+          - security
+
+      - name: response-transformer
+        route: claude-proxy-route
+        config:
+          add:
+            headers:
+              - "X-Kong-Proxy:true"
+              - "X-Masked-Response:true"
+              - "X-Environment:{{ .Values.global.environment }}"
+        tags:
+          - metadata
+
+      {{- if .Values.security.enableRateLimiting }}
+      - name: rate-limiting
+        route: claude-proxy-route
+        config:
+          minute: {{ .Values.security.rateLimitMinute }}
+          hour: {{ .Values.security.rateLimitHour }}
+          policy: local
+          hide_client_headers: false
+        tags:
+          - security
+          - rate-limiting
+      {{- end }}
+
+    upstreams:
+      - name: claude-api-upstream
+        algorithm: round-robin
+        slots: 10000
+        healthchecks:
+          active:
+            healthy:
+              interval: 30
+              successes: 2
+            unhealthy:
+              interval: 5
+              http_failures: 5
+              tcp_failures: 5
+              timeouts: 5
+          passive:
+            healthy:
+              successes: 2
+            unhealthy:
+              http_failures: 5
+              tcp_failures: 5
+              timeouts: 5
+        tags:
+          - claude
+          - {{ .Values.global.environment }}
+
+  # Environment variables for Kong
+  kong.env: |
+    KONG_DATABASE=off
+    KONG_DECLARATIVE_CONFIG=/usr/local/kong/declarative/kong.yml
+    KONG_PROXY_ACCESS_LOG=/dev/stdout
+    KONG_ADMIN_ACCESS_LOG=/dev/stdout
+    KONG_PROXY_ERROR_LOG=/dev/stderr
+    KONG_ADMIN_ERROR_LOG=/dev/stderr
+    KONG_LOG_LEVEL={{ .Values.kong.config.logLevel }}
+    KONG_MEM_CACHE_SIZE={{ .Values.kong.config.memCacheSize }}
+    KONG_NGINX_WORKER_PROCESSES=auto
+    KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE={{ .Values.performance.maxBodySize }}
+    
+    # Redis configuration for AWS masker plugin
+    KONG_REDIS_HOST={{ include "kong-aws-masking.redis.host" . }}
+    KONG_REDIS_PORT={{ .Values.redis.service.port }}
+    KONG_REDIS_DATABASE={{ .Values.redis.config.database }}
+    
+    # Performance tuning
+    KONG_NGINX_HTTP_LUA_SHARED_DICT_KONG_MASKER_CACHE={{ .Values.performance.cacheSize }}
+    KONG_NGINX_HTTP_LUA_SHARED_DICT_KONG_MASKER_STATS={{ .Values.performance.cacheSize }}
+    
+    {{- if eq .Values.global.environment "localstack" }}
+    # LocalStack-specific configurations
+    KONG_LOG_LEVEL=debug
+    {{- end }}
+{{- end }}

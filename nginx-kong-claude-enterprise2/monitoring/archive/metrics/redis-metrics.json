@@ -1,0 +1,19 @@
+{
+    "timestamp": "2025-07-30T00:10:22Z",
+    "redis_metrics": {
+        "memory": {
+            "used_memory_bytes": 0,
+            "used_memory_human": "N/A",
+            "total_keys": NOAUTH Authentication required.
+        },
+        "connections": {
+            "connected_clients": 0,
+            "total_commands_processed": 0
+        },
+        "masking_data": {
+            "mask_keys":        2,
+            "unmask_keys":        2,
+            "total_mapping_keys": 4
+        }
+    }
+}

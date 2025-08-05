@@ -1,0 +1,161 @@
+# LocalStack-specific values for kong-aws-masking
+# Override default values for LocalStack testing environment
+
+global:
+  namespace: claude-enterprise
+  environment: localstack
+  region: us-east-1  # LocalStack default
+  timezone: "Asia/Seoul"
+
+# LocalStack-specific image configurations
+images:
+  kong:
+    repository: kong
+    tag: "3.9.0-ubuntu"
+    pullPolicy: IfNotPresent
+  nginx:
+    repository: nginx
+    tag: "1.24-alpine"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: "7.2-alpine"
+    pullPolicy: IfNotPresent
+
+# Redis for LocalStack (reduced resources)
+redis:
+  enabled: true
+  replicas: 1
+  persistence:
+    enabled: false  # Use emptyDir for testing
+    storageClass: ""
+    size: 1Gi
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "50m"
+    limits:
+      memory: "256Mi"
+      cpu: "100m"
+  config:
+    password: "localstack-redis-test"
+    database: 0
+    maxConnections: 50
+
+# Kong for LocalStack (reduced resources)
+kong:
+  enabled: true
+  replicas: 1  # Single replica for testing
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+  config:
+    logLevel: "debug"  # More verbose for testing
+    memoryLimit: "1G"
+    memCacheSize: "512m"
+
+# Nginx for LocalStack (reduced resources)
+nginx:
+  enabled: true
+  replicas: 1  # Single replica for testing
+  resources:
+    requests:
+      memory: "64Mi"
+      cpu: "50m"
+    limits:
+      memory: "128Mi"
+      cpu: "100m"
+
+# Claude SDK Service (NodePort for LocalStack)
+claudeSDK:
+  enabled: true
+  service:
+    name: claude-sdk
+    port: 8085
+    type: NodePort  # NodePort instead of LoadBalancer
+    nodePort: 30085
+
+# LocalStack test secrets (non-production values)
+secrets:
+  claude:
+    apiKey: "sk-ant-api03-localstack-test-key"
+  aws:
+    accessKeyId: "test"
+    secretAccessKey: "test"
+    region: "us-east-1"
+  redis:
+    password: "localstack-redis-test"
+
+# Security (relaxed for testing)
+security:
+  enableRateLimiting: false
+  rateLimitMinute: 1000
+  rateLimitHour: 10000
+  enableBotDetection: false
+  enableIpRestriction: false
+  networkPolicies:
+    enabled: false  # Disabled for easier testing
+
+# Monitoring (simplified for testing)
+monitoring:
+  enabled: true
+  healthCheck: true
+  kongEvents: false  # Reduced noise
+  publishEvents: false
+  metrics:
+    enabled: false  # Disabled for testing
+    serviceMonitor:
+      enabled: false
+
+# Performance (reduced for testing)
+performance:
+  maxBodySize: 1048576  # 1MB for testing
+  cacheSize: 1000
+  workerPoolSize: 2
+  batchSize: 10
+
+# Logging (verbose for testing)
+logging:
+  level: "debug"
+  maskedRequests: true
+  debug: true
+  verbose: true
+
+# HA disabled for testing
+ha:
+  enabled: false
+  podAntiAffinity: false
+  topologySpreadConstraints: false
+
+# Autoscaling disabled for testing
+autoscaling:
+  enabled: false
+
+# Ingress disabled for LocalStack
+ingress:
+  enabled: false
+
+# Test configuration for LocalStack
+tests:
+  enabled: true
+  connectivity: true
+  masking: true
+  awsResources:
+    # LocalStack test resources
+    - "i-localstack123456789"
+    - "localstack-test-bucket"
+    - "10.0.1.100"
+    - "vpc-localstack123"
+    - "localstack-db.cluster-test.us-east-1.rds.amazonaws.com"
+
+# LocalStack-specific environment variables
+env:
+  LOCALSTACK_HOSTNAME: "localstack"
+  AWS_ENDPOINT_URL: "http://localstack:4566"
+  AWS_DEFAULT_REGION: "us-east-1"
+  AWS_ACCESS_KEY_ID: "test"
+  AWS_SECRET_ACCESS_KEY: "test"

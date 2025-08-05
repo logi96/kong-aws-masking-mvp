@@ -468,9 +468,9 @@
         // Configuration
         const API_ENDPOINTS = {
             kongAdmin: 'http://localhost:8001/status',
-            kongProxy: 'http://localhost:8000',
+            kongProxy: 'http://localhost:8010',
             backend: 'http://localhost:3000/health',
-            nginx: 'http://localhost:8080/health'
+            nginx: 'http://localhost:8082/health'
         };
 
         // State
@@ -527,7 +527,7 @@
                 // Proxy check
                 const proxyResponse = await fetchWithTimeout(API_ENDPOINTS.kongProxy, 2000);
                 if (proxyResponse.ok) {
-                    document.getElementById('kongProxyStatus').textContent = 'Port 8000 Active';
+                    document.getElementById('kongProxyStatus').textContent = 'Port 8010 Active';
                     document.getElementById('kongProxyStatus').className = 'metric-value good';
                 }
                 

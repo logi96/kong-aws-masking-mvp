@@ -1,0 +1,57 @@
+{{- if .Values.kong.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.kong.service.type }}
+  ports:
+  - port: {{ .Values.kong.service.port }}
+    targetPort: proxy
+    protocol: TCP
+    name: proxy
+  - port: 8443
+    targetPort: proxy-ssl
+    protocol: TCP
+    name: proxy-ssl
+  - port: {{ .Values.kong.service.adminPort }}
+    targetPort: admin
+    protocol: TCP
+    name: admin
+  - port: 8444
+    targetPort: admin-ssl
+    protocol: TCP
+    name: admin-ssl
+  selector:
+    {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 4 }}
+---
+{{- if .Values.monitoring.enabled }}
+# Service for metrics endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-kong-metrics
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.kong.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+  {{- if .Values.monitoring.metrics.serviceMonitor.enabled }}
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.monitoring.metrics.port }}"
+    prometheus.io/path: "{{ .Values.monitoring.metrics.path }}"
+  {{- end }}
+spec:
+  type: ClusterIP
+  ports:
+  - port: {{ .Values.monitoring.metrics.port }}
+    targetPort: admin
+    protocol: TCP
+    name: metrics
+  selector:
+    {{- include "kong-aws-masking.kong.selectorLabels" . | nindent 4 }}
+{{- end }}
+{{- end }}

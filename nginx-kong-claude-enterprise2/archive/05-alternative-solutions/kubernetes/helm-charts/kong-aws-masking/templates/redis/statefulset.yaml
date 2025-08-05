@@ -1,0 +1,117 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-redis
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.redis.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "kong-aws-masking.fullname" . }}-redis
+  replicas: {{ .Values.redis.replicas }}
+  selector:
+    matchLabels:
+      {{- include "kong-aws-masking.redis.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kong-aws-masking.redis.selectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/redis/configmap.yaml") . | sha256sum }}
+    spec:
+      containers:
+      - name: redis
+        image: "{{ .Values.images.redis.repository }}:{{ .Values.images.redis.tag }}"
+        imagePullPolicy: {{ .Values.images.redis.pullPolicy }}
+        ports:
+        - name: redis
+          containerPort: 6379
+          protocol: TCP
+        env:
+        {{- include "kong-aws-masking.commonEnv" . | nindent 8 }}
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "kong-aws-masking.fullname" . }}-secrets
+              key: redis-password
+        args:
+        - redis-server
+        - /etc/redis/redis.conf
+        - --requirepass
+        - $(REDIS_PASSWORD)
+        resources:
+          {{- toYaml .Values.redis.resources | nindent 10 }}
+        livenessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - redis-cli
+            - -a
+            - $(REDIS_PASSWORD)
+            - ping
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+        volumeMounts:
+        - name: redis-config
+          mountPath: /etc/redis
+        {{- if .Values.redis.persistence.enabled }}
+        - name: redis-data
+          mountPath: /data
+        {{- end }}
+      volumes:
+      - name: redis-config
+        configMap:
+          name: {{ include "kong-aws-masking.fullname" . }}-redis-config
+      {{- if not .Values.redis.persistence.enabled }}
+      - name: redis-data
+        emptyDir: {}
+      {{- end }}
+      securityContext:
+        fsGroup: 999
+        runAsUser: 999
+        runAsGroup: 999
+      {{- if .Values.ha.enabled }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - redis
+              topologyKey: kubernetes.io/hostname
+      {{- end }}
+  {{- if .Values.redis.persistence.enabled }}
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-data
+      labels:
+        {{- include "kong-aws-masking.redis.labels" . | nindent 8 }}
+    spec:
+      accessModes:
+        - {{ .Values.redis.persistence.accessMode }}
+      resources:
+        requests:
+          storage: {{ .Values.redis.persistence.size }}
+      {{- if .Values.redis.persistence.storageClass }}
+      storageClassName: {{ .Values.redis.persistence.storageClass }}
+      {{- end }}
+  {{- end }}
+{{- end }}

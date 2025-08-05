@@ -1,0 +1,50 @@
+# Kong AWS Masking Enterprise 2 - Terraform 변수 예제 파일
+# 이 파일을 복사하여 terraform.tfvars로 저장하고 실제 값으로 수정하세요
+
+# 환경 설정
+environment = "development"
+
+# AWS 설정
+aws_region     = "us-east-1"
+aws_access_key = "test"      # LocalStack용 (실제 AWS는 실제 키 사용)
+aws_secret_key = "test"      # LocalStack용 (실제 AWS는 실제 키 사용)
+
+# LocalStack 설정
+localstack_enabled  = true
+localstack_endpoint = "http://localstack:4566"  # Docker 네트워크 내에서
+
+# 네트워크 설정
+vpc_cidr           = "10.0.0.0/16"
+availability_zones = ["us-east-1a", "us-east-1b"]
+allowed_ssh_cidrs  = ["0.0.0.0/0"]        # 개발 환경에서만 사용
+allowed_admin_cidrs = ["10.0.0.0/16"]
+
+# EC2 인스턴스 설정
+instance_type     = "t3.medium"
+instance_count    = 1
+key_pair_name     = ""                     # LocalStack에서는 비워둠
+root_volume_size  = 20
+
+# Kong 애플리케이션 설정
+anthropic_api_key = "sk-ant-api03-your-actual-api-key-here"
+redis_password    = "kong-redis-secure-2024"
+kong_admin_token  = "kong-admin-secure-token-2024"
+
+# 모니터링 설정
+enable_monitoring    = true
+log_retention_days   = 7
+
+# 로드 밸런서 설정
+enable_load_balancer = true
+
+# 백업 설정
+enable_daily_backups   = true
+backup_retention_days  = 7
+
+# 추가 태그
+additional_tags = {
+  Owner       = "DevOps Team"
+  Project     = "Kong AWS Masking"
+  CostCenter  = "Engineering"
+  Environment = "development"
+}

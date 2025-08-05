@@ -1,0 +1,68 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.global.namespace }}
+  labels:
+    name: {{ .Values.global.namespace }}
+    environment: {{ .Values.global.environment }}
+    app.kubernetes.io/name: {{ include "kong-aws-masking.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
+---
+{{- if .Values.security.networkPolicies.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-network-policy
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  # Allow ingress from same namespace
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: {{ .Values.global.namespace }}
+  {{- range .Values.security.networkPolicies.allowFromNamespaces }}
+  # Allow ingress from specific namespaces
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: {{ . }}
+  {{- end }}
+  egress:
+  # Allow egress to same namespace
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: {{ .Values.global.namespace }}
+  # Allow egress to kube-system (DNS)
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+  # Allow egress to Claude API
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 443
+  # Allow egress to AWS services
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 80
+    - protocol: TCP
+      port: 443
+{{- end }}

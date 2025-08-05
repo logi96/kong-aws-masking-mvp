@@ -1,0 +1,111 @@
+{{- if .Values.redis.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kong-aws-masking.fullname" . }}-redis-config
+  namespace: {{ .Values.global.namespace }}
+  labels:
+    {{- include "kong-aws-masking.redis.labels" . | nindent 4 }}
+data:
+  redis.conf: |
+    # Basic Redis configuration for Kong AWS Masking
+    # Network and connection settings
+    bind 0.0.0.0
+    port 6379
+    tcp-backlog 511
+    timeout 0
+    tcp-keepalive 300
+    
+    # General settings
+    daemonize no
+    pidfile /var/run/redis_6379.pid
+    loglevel notice
+    databases 16
+    always-show-logo no
+    
+    # Security
+    protected-mode yes
+    # requirepass will be set via command line args
+    
+    # Memory management
+    maxmemory-policy allkeys-lru
+    
+    # Persistence settings
+    {{- if .Values.redis.persistence.enabled }}
+    save 900 1
+    save 300 10
+    save 60 10000
+    stop-writes-on-bgsave-error yes
+    rdbcompression yes
+    rdbchecksum yes
+    dbfilename dump.rdb
+    dir /data
+    {{- else }}
+    save ""
+    {{- end }}
+    
+    # Append only file
+    {{- if .Values.redis.persistence.enabled }}
+    appendonly yes
+    appendfilename "appendonly.aof"
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    aof-load-truncated yes
+    aof-use-rdb-preamble yes
+    {{- else }}
+    appendonly no
+    {{- end }}
+    
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+    
+    # Client settings
+    maxclients {{ .Values.redis.config.maxConnections }}
+    
+    # Memory optimization for AWS masking workload
+    hash-max-ziplist-entries 512
+    hash-max-ziplist-value 64
+    list-max-ziplist-size -2
+    list-compress-depth 0
+    set-max-intset-entries 512
+    zset-max-ziplist-entries 128
+    zset-max-ziplist-value 64
+    hll-sparse-max-bytes 3000
+    stream-node-max-bytes 4096
+    stream-node-max-entries 100
+    
+    # Active rehashing
+    activerehashing yes
+    
+    # Client output buffer limits
+    client-output-buffer-limit normal 0 0 0
+    client-output-buffer-limit replica 256mb 64mb 60
+    client-output-buffer-limit pubsub 32mb 8mb 60
+    
+    # Client query buffer limit
+    client-query-buffer-limit 1gb
+    
+    # Protocol buffer limit
+    proto-max-bulk-len 512mb
+    
+    # Hz setting
+    hz 10
+    
+    # Dynamic hz
+    dynamic-hz yes
+    
+    # AOF rewrite settings
+    aof-rewrite-incremental-fsync yes
+    
+    # RDB settings
+    rdb-save-incremental-fsync yes
+    
+    # Jemalloc settings for better memory usage
+    jemalloc-bg-thread yes
+    
+    # Timezone
+    timezone {{ .Values.global.timezone }}
+{{- end }}
